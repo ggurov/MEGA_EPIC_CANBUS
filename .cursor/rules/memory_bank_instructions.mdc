@@ -1,0 +1,81 @@
+---
+alwaysApply: true
+---
+
+# Memory Bank Instructions
+
+## Purpose
+This Memory Bank provides structured context about the MEGA_EPIC_CANBUS project for AI assistants and developers. It contains the essential knowledge needed to understand, maintain, and extend the firmware.
+
+## File Structure
+
+### Core Files (All Required)
+1. **projectbrief.md** - Foundation document defining project identity, goals, and architecture
+2. **productContext.md** - Problem/solution overview, target users, success criteria
+3. **memory_bank_instructions.md** - This file, explains how to use the Memory Bank
+4. **activeContext.md** - Current work focus, recent changes, next steps
+5. **systemPatterns.md** - Architecture, design patterns, code organization
+6. **techContext.md** - Technologies, libraries, development setup, constraints
+7. **progress.md** - Implementation status, what works, what remains
+
+## How to Use This Memory Bank
+
+### For AI Assistants
+1. **Start with projectbrief.md** to understand the project foundation
+2. **Read productContext.md** to grasp the problem being solved
+3. **Check activeContext.md** for current work and immediate priorities
+4. **Reference systemPatterns.md** when making architectural decisions
+5. **Consult techContext.md** for technical constraints and environment
+6. **Review progress.md** to understand implementation status
+
+### For Human Developers
+- Read files in order (projectbrief → productContext → others)
+- Use as reference when onboarding to the project
+- Update activeContext.md as work progresses
+- Update progress.md when features are completed
+- Keep systemPatterns.md current with architectural changes
+
+## Updating the Memory Bank
+
+### When to Update
+- **activeContext.md:** After significant work sessions, milestone completion, or direction changes
+- **progress.md:** When features are implemented, tested, or deprecated
+- **systemPatterns.md:** When adding new modules, refactoring, or changing design patterns
+- **techContext.md:** When adding libraries, changing tooling, or discovering new constraints
+- **projectbrief.md:** Rarely - only for fundamental scope/goal changes
+- **productContext.md:** Rarely - only if problem statement or solution approach changes
+
+### How to Update
+1. Keep updates concise and factual
+2. Use neutral, technical tone
+3. Document trade-offs and decisions made
+4. Include code smell observations where relevant
+5. Maintain consistent formatting
+6. Date significant updates in activeContext.md and progress.md
+
+## Key Principles
+
+### Concise Over Verbose
+Focus on essential information. Avoid marketing language or unnecessary elaboration.
+
+### Factual Over Aspirational
+Document what IS, not what could be. Plans belong in activeContext.md.
+
+### Technical Over Conceptual
+Include concrete details: pin assignments, protocols, performance numbers.
+
+### Current Over Historical
+activeContext.md and progress.md track current state. Major historical context only if relevant to decisions.
+
+## Reference Materials
+- Full protocol spec: `.project/epic_can_bus_spec.txt`
+- Detailed requirements: `.project/project_requirement.txt`
+- Current firmware: `mega_epic_canbus.ino`
+
+## Maintenance
+Memory Bank should be reviewed and updated at:
+- Start of new development phase
+- After completing major features
+- When encountering unexpected constraints
+- Before handing off to new developers
+

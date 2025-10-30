@@ -1,0 +1,109 @@
+Name: MEGA_EPIC_CANBUS
+
+
+This project focuses on developing firmware for the Arduino Mega2560 paired with an MCP_CAN bus shield. The primary goal is to enable seamless communication with the epicEFI firmware via CAN bus, significantly expanding the input/output (IO) capabilities of the system. By leveraging the robust IO features of the Mega2560 and CAN communication,
+this project aims to provide enhanced flexibility and scalability for advanced automotive or embedded applications at budget prices using hardware everybody can understand, obtain, and work with.
+
+## Communication Overview
+
+we will use 500kbps can bus speed
+
+This project communicates with the epicEFI ECU using the **EPIC_CAN_BUS** extension of the epicEFI firmware. Full protocol details are found in `.project/epic_can_bus_spec.txt`.
+
+### Analog Input (Mega → ECU)
+- **Read analog values:** The Mega2560 will sample its analog input pins (initial implementation will use `analogRead();` later, asynchronous capture may be considered).
+- **Send over CAN:** Each raw ADC value will be transmitted to epicEFI as a `variable_set` frame in the EPIC_CAN_BUS protocol, updating the corresponding variable on the ECU.
+
+### Digital Input (Mega → ECU)
+- ECU requests the state of Mega2560 digital pins.
+- The Mega2560 reads the specified pins using `digitalRead()`.
+- The resulting digital states are packed (e.g., as bitfields) and sent to the ECU via a designated variable.
+
+### Digital Output (ECU → Mega)
+- The epicEFI ECU stores a variable containing desired digital output states (bit order/pin map to be pre-determined).
+- The Mega2560 polls (requests) this variable over CAN.
+- Upon receiving the updated pin states, `digitalWrite()` is used to update the Mega2560's digital outputs accordingly.
+
+### PWM Outputs
+- The Mega2560 will request variables from the ECU containing PWM parameters (currently TBD: frequency, duty cycle, or both).
+- Once received, the Mega adjusts its hardware PWM outputs as directed.
+
+### Interrupt Counters (Planned/Future)
+- The handling of interrupt-based counters (e.g., for wheel speed sensing) will be implemented on the Mega2560.
+- The Mega will maintain counters (possibly with timestamps or delta reporting) and relay this data to the ECU over CAN.
+- Exact implementation TBD.
+
+**Note:** All implementation specifics – variable mappings, bit-packing schemes, and asynchronous improvements – will be documented as the project evolves.
+
+Arduino Mega2560 has the following IO available:
+- Analogs: 16 analog input pins (A0-A15) 0-5v native
+- Digital in/digital out: 54 digital I/O pins, of which 15 can be used as PWM outputs
+- Hardware PWM: 15 pins (2 to 13 and 44 to 46)
+- Interrupt counters: 6 external interrupts (pins 2, 3, 18, 19, 20, 21)
+- External communication bus: 4 hardware serial ports (UART), I2C (pins 20, 21), SPI (pins 50, 51, 52, 53), CAN (with MCP_CAN shield)
+
+--------------------------
+
+The MEGA_EPIC_CANBUS pinout should be as follows:
+
+- **Analog Inputs:**  
+  Pins A0 to A15 (total 16 pins) will be used exclusively as analog inputs.  
+  - A0 - A15
+
+- **Hardware PWM Outputs:**  
+  The following pins, which are hardware PWM capable on Mega2560, will be used as PWM outputs:  
+  - Pins 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13  
+  - Pins 44, 45, 46  
+  - **Note:** Pin 9, although hardware PWM capable, is reserved as the chip-select (CS) for the MCP_CAN shield and should not be used as a general PWM output.
+
+Digital Button Inputs:
+- D20 to D34 (inclusive): Assigned as digital button input pins.
+
+Digital Low-Speed Outputs:
+- D35 to D49 (inclusive): Assigned as digital low-speed digital output pins.
+
+Reserved and undecided:
+D50 (MISO), D51 (MOSI), D52 (SCK), D53 (SS) are reserved for use by the MCP_CAN shield (SPI interface) and should not be used as general GPIO pins.
+D14 - D19: UART3 (TX3/RX3) and UART2 (TX2/RX2), also Digital I/O if UART not used
+D18, D19, D20, D21: External Interrupt Capable
+
+
+-----------------------------------
+
+Limitations of SPI_CAN on Mega2560 (speed & frames per second):
+
+1. **SPI Bus Speed Limitations:**
+   - The maximum SPI clock frequency on the Arduino Mega2560 is 8 MHz due to its ATmega2560 microcontroller.
+   - The MCP2515 CAN controller (used in the common MCP_CAN shields) officially supports SPI clock frequencies up to 10 MHz, but practical stability on the Mega2560 is around 8 MHz.
+
+2. **CAN Bitrate Limitations:**
+   - MCP2515 supports CAN bus speeds up to 1 Mbps.
+   - Achievable speed depends on SPI bandwidth, code efficiency, and ISR (interrupt) handling overhead.
+
+3. **Frames per Second (Throughput):**
+   - The theoretical maximum on the CAN bus at 1 Mbps is about 800–1,000 standard frames/sec (11-bit ID), but real throughput is lower due to:
+     - SPI read/write overhead.
+     - Arduino’s limited processing speed (16 MHz, single core, no DMA).
+     - Library implementation inefficiencies and latency.
+     - MCP2515 internal RX buffer size (two buffers): If host doesn’t read fast enough, frames are dropped.
+
+   - In practice:
+     - On Mega2560, typical achievable reliable read speeds are **~400–700 CAN frames/sec** at 1 Mbps, especially with standard libraries (e.g., Seeed Studio’s MCP_CAN).
+     - At lower CAN baudrates (125 kbps, 250 kbps), frames/sec possible is decreased accordingly.
+
+4. **Interrupt Handling:**
+   - Heavy interrupt traffic (e.g., bursty CAN buses) can overwhelm the Arduino if processing or SPI communication is delayed.
+   - During high CAN traffic, you may experience lost frames if the Arduino doesn’t keep up with MCP2515.
+
+5. **Latency:**
+   - The round-trip latency (from CAN event to Arduino to SPI to user code) is on the order of hundreds of microseconds at best, depending on sketch complexity.
+
+**Summary:**  
+The combination of the ATmega2560’s 8 MHz SPI, the speed of MCP2515, and SRAM/processing constraints mean most Mega2560+MCP_CAN setups achieve at best several hundred reliable frames per second at 500 kbps–1 Mbps, below the theoretical maximum for the CAN bus.
+
+For very high-throughput or low-latency applications, a more powerful microcontroller or direct CAN peripheral (not SPI bridge) is recommended.
+
+
+---------------------
+
+

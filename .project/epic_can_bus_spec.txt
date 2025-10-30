@@ -1,0 +1,326 @@
+# EPIC Over CANbus Protocol Summary
+
+## Overview
+
+EPIC (Engine Parameter Interface over CAN) is a protocol for remote variable access and function calls over CAN bus. It provides three core operations:
+1. **Variable Request/Response** - Read runtime and configuration values
+2. **Variable Set** - Write configuration values (fire-and-forget)
+3. **Function Call** - Execute registered functions with arguments and return values
+
+## CAN ID Base Offsets
+
+All CAN IDs use **11-bit standard IDs** with per-ECU addressing: `BASE + ecuCanId` (where `ecuCanId` = 0-15)
+
+| Operation | Base ID | Per-ECU ID | Description |
+|-----------|---------|------------|-------------|
+| Variable Request | `0x700` | `0x700 + ecuCanId` | Request variable value |
+| Variable Response | `0x720` | `0x720 + ecuCanId` | Response with variable value |
+| Function Request | `0x740` | `0x740 + ecuCanId` | Call function with arguments |
+| Function Response | `0x760` | `0x760 + ecuCanId` | Response with return value |
+| Variable Set | `0x780` | `0x780 + ecuCanId` | Write variable (no ACK) |
+
+**Example**: For ECU with `ecuCanId = 3`:
+- Variable requests: `0x703`
+- Variable responses: `0x723`
+- Function requests: `0x743`
+- Function responses: `0x763`
+- Variable sets: `0x783`
+
+---
+
+## 1. Variable Request/Response Pattern (Get Variable)
+
+Read runtime values (from `outputChannels`) or configuration values by hash.
+
+### Request Frame (`0x700 + ecuCanId`)
+
+```
+DLC: 4 bytes
+Byte [0..3]: Variable Hash (int32, big-endian, two's complement)
+```
+
+**Example**: Request variable with hash `-230533156` (0xF242A4DC)
+```
+CAN ID: 0x700 + ecuCanId
+Data: [F2 42 A4 DC]
+```
+
+### Response Frame (`0x720 + ecuCanId`)
+
+```
+DLC: 8 bytes
+Byte [0..3]: Variable Hash (int32, big-endian) - echo of requested hash
+Byte [4..7]: Variable Value (float32, big-endian)
+```
+
+**Example**: Response with value `123.45`
+```
+CAN ID: 0x720 + ecuCanId
+Data: [F2 42 A4 DC] [42 F6 E6 66]
+      └─── Hash ───┘ └── Value ──┘
+```
+
+### Implementation Details
+
+- **Lookup Priority**:
+  1. Runtime values via `getOutputValueByHash()` (from `engine->outputChannels`)
+  2. Configuration values via `getConfigValueByHash()` (from `engine->config`)
+  
+- **Error Handling**: Returns `0.0` (zero-as-error) if variable not found
+
+- **Variable Hash Generation**: 
+  - Hashes are signed 32-bit integers (CRC32-based)
+  - Generated from variable names during firmware build
+  - Negative hashes are valid (two's complement representation)
+  - Use `gen_variables.py` to generate hash documentation
+
+---
+
+## 2. Variable Set Pattern (Write Variable)
+
+Write configuration values by hash. Fire-and-forget design with no acknowledgment.
+
+### Set Frame (`0x780 + ecuCanId`)
+
+```
+DLC: 8 bytes
+Byte [0..3]: Variable Hash (int32, big-endian)
+Byte [4..7]: Variable Value (float32, big-endian)
+```
+
+**Example**: Set variable with hash `123456789` to value `50.0`
+```
+CAN ID: 0x780 + ecuCanId
+Data: [07 5B CD 15] [42 48 00 00]
+      └─── Hash ───┘ └── Value ──┘
+```
+
+### Configuration Requirements
+
+- **Enable Flag**: `epicCanAllowSetVar` must be enabled in ECU configuration
+- **Read-Only Mode**: Optional `epicCanEcuReadONLYONWrite` flag locks ECU to read-only after first write received
+- **No Acknowledgment**: Set operations are fire-and-forget (no response frame)
+
+### Implementation Details
+
+- Uses `setConfigValueByName()` with hash lookup
+- Only writes to configuration values (not runtime outputs)
+- Changes may require ECU reset or "Burn" operation to persist
+
+---
+
+## 3. Function Call Pattern (Request/Response)
+
+Execute registered functions with up to 2 arguments and receive return values.
+
+### Request Frame (`0x740 + ecuCanId`)
+
+```
+DLC: 6 or 8 bytes
+Byte [0..1]: Function ID (uint16, big-endian)
+Byte [2..5]: Argument 1 (float32, big-endian)
+Byte [6..7]: Optional Argument 2 (int16, big-endian) - if DLC=8
+```
+
+**Example**: Call function ID `10` (getEtbTarget) with no arguments
+```
+CAN ID: 0x740 + ecuCanId
+Data: [00 0A] [00 00 00 00]
+      └─ ID ┘ └─── Arg1 ──┘
+```
+
+**Example**: Call function ID `1` (setFuelAdd) with argument `4.5`
+```
+CAN ID: 0x740 + ecuCanId
+Data: [00 01] [40 90 00 00]
+      └─ ID ┘ └─── Arg1 ──┘
+```
+
+**Example**: Call function ID `38` (setLuaGauge) with two arguments: value `100.0` and index `2`
+```
+CAN ID: 0x740 + ecuCanId
+Data: [00 26] [42 C8 00 00] [00 02]
+      └─ ID ┘ └─── Arg1 ──┘ └ Arg2┘
+```
+
+### Response Frame (`0x760 + ecuCanId`)
+
+```
+DLC: 8 bytes
+Byte [0..1]: Function ID (uint16, big-endian) - echo of called function
+Byte [2..3]: Reserved (0x00)
+Byte [4..7]: Return Value (float32, big-endian) - 0.0 if error or no return value
+```
+
+**Example**: Response from getEtbTarget returning `45.5`
+```
+CAN ID: 0x760 + ecuCanId
+Data: [00 0A] [00 00] [42 36 00 00]
+      └─ ID ┘ └ Rsvd┘ └── Return ──┘
+```
+
+### Function Registry
+
+The ECU maintains a function registry (`kEpicFunctions[]`) with 38 built-in functions. Each function specifies:
+- **Function ID** (uint16): Unique identifier (1-38)
+- **Name**: Human-readable function name
+- **Argument Count**: 0, 1, or 2 arguments
+- **Returns Value**: Boolean indicating if function returns a value
+
+**Common Functions**:
+
+| ID | Name | Args | Returns | Description |
+|----|------|------|---------|-------------|
+| 1 | setFuelAdd | 1 | No | Add fuel adjustment (%) |
+| 2 | setFuelMult | 1 | No | Fuel multiplier |
+| 3 | setTimingAdd | 1 | No | Add timing adjustment (deg) |
+| 4 | setTimingMult | 1 | No | Timing multiplier |
+| 5 | setBoostTargetAdd | 1 | No | Boost target adder (kPa) |
+| 6 | setBoostTargetMult | 1 | No | Boost target multiplier |
+| 7 | setBoostDutyAdd | 1 | No | Boost duty cycle adder (%) |
+| 8 | setIdleAdd | 1 | No | Idle position adder (%) |
+| 9 | setIdleRpm | 1 | No | Set idle RPM target |
+| 10 | getEtbTarget | 0 | Yes | Get ETB target position (%) |
+| 11 | setEtbAdd | 1 | No | ETB position adder (%) |
+| 12 | setEwgAdd | 1 | No | Electronic wastegate adder (%) |
+| 13 | setEtbDisabled | 1 | No | Disable ETB (0=enable, 1=disable) |
+| 14 | setIgnDisabled | 1 | No | Disable ignition (0=enable, 1=disable) |
+| 15 | setFuelDisabled | 1 | No | Disable fuel (0=enable, 1=disable) |
+| 22 | getGpPwm | 1 | Yes | Get GPPWM output (%) by index |
+| 28 | selfStimulateRPM | 1 | No | Set trigger simulator RPM |
+| 32 | getIdlePosition | 0 | Yes | Get current idle position (%) |
+| 33 | getTorque | 0 | Yes | Get torque estimate (Nm) |
+| 36 | getEngineState | 0 | Yes | Get engine state (0=stopped, 1=cranking, 2=running) |
+| 38 | setLuaGauge | 2 | No | Set Lua gauge value (value, index) |
+
+**Full function list**: See `functions_v1.json` generated by `gen_functions.py`
+
+### Error Handling
+
+- Function not found → returns `0.0` in response
+- Function doesn't return value → returns `0.0` in response
+- No explicit error codes (zero-as-error pattern)
+
+---
+
+## Protocol Characteristics
+
+### Byte Order
+All multi-byte fields use **big-endian** byte order on the wire.
+
+### Data Types
+- **Variable Hash**: Signed int32 (two's complement)
+- **Function ID**: Unsigned int16
+- **Variable Values**: float32 (IEEE 754)
+- **Function Arguments**: float32 (Arg1) and int16 (Arg2)
+- **Return Values**: float32
+
+### Error Handling Philosophy
+EPIC uses a **zero-as-error** pattern:
+- Variable not found → returns `0.0`
+- Function not found → returns `0.0`
+- Invalid operation → returns `0.0`
+
+Clients must handle defensive checking and distinguish between legitimate zero values and errors.
+
+### Bus Routing
+- Responses always sent on the **same CAN bus** as the request
+- Multi-bus ECUs automatically route responses correctly
+
+---
+
+## Diagnostic Counters
+
+The ECU exposes diagnostic counters in `outputChannels` for monitoring EPIC CAN activity:
+
+| Counter | Description |
+|---------|-------------|
+| `can_var_get_counter` | Total variable requests received |
+| `can_call_counter` | Total function calls received |
+| `can_call_counter_dlc_ok` | Function calls with valid DLC |
+| `can_call_last_func_id` | Last function ID called |
+| `can_call_last_arg` | Last function argument value |
+| `can_call_last_ret` | Last function return value |
+| `can_call_last_ok` | Last function call success status |
+| `can_call_found_func` | Last found function ID |
+
+These counters are accessible via TunerStudio or EPIC variable requests.
+
+---
+
+## Implementation Reference
+
+### Firmware Files
+- **Header**: `firmware/controllers/can/epic_can.h`
+- **Implementation**: `firmware/controllers/can/epic_can.cpp`
+- **Function Registry**: `kEpicFunctions[]` array in `epic_can.cpp`
+- **Variable Lookup**: `firmware/console/binary/value_lookup_generated.cpp` (generated)
+
+### Client Tools
+- **Python Examples**: `epic_can_bus/examples/python/`
+  - `get_var.py` - Variable request example
+  - `call_func.py` - Function call example
+- **Variable Documentation**: Generated by `gen_variables.py` → `Docs/variables.md`
+- **Function Documentation**: Generated by `gen_functions.py` → `functions_v1.json`
+
+### Setup Scripts
+- **CAN Interface Setup**: `scripts/can0_up.sh` - Brings up SocketCAN interface
+- **Default Bitrate**: 500 kbps
+
+---
+
+## Example Workflow
+
+### 1. Read Engine RPM
+```bash
+# Generate variable documentation
+python3 epic_can_bus/gen_variables.py
+
+# Find RPM hash in Docs/variables.md
+# Example: RPM hash = -123456789
+
+# Request RPM from ECU 0
+python3 epic_can_bus/examples/python/get_var.py 0 RPM
+```
+
+### 2. Set Fuel Adjustment
+```bash
+# Call setFuelAdd function with +10% adjustment
+python3 epic_can_bus/examples/python/call_func.py 0 setFuelAdd 10.0
+```
+
+### 3. Query ETB Target Position
+```bash
+# Call getEtbTarget function (returns current target)
+python3 epic_can_bus/examples/python/call_func.py 0 getEtbTarget
+```
+
+---
+
+## Security Considerations
+
+- **Variable Set Protection**: Disabled by default; requires `epicCanAllowSetVar` flag
+- **Read-Only Mode**: `epicCanEcuReadONLYONWrite` locks configuration after first write
+- **No Authentication**: EPIC protocol has no built-in authentication or encryption
+- **Network Isolation**: CAN bus should be isolated from untrusted networks
+- **Rate Limiting**: Currently not implemented (TODO in code)
+
+---
+
+## Future Enhancements
+
+- Rate limiting for variable set and function call operations
+- Extended data types (int32, uint32, string)
+- Bulk variable read/write operations
+- Event subscription/notification system
+- Authentication and access control
+
+---
+
+## References
+
+- **User Guide**: `epic_can_bus/README.md`
+- **Variable Hash Docs**: Generated by `gen_variables.py`
+- **Function Registry**: `functions_v1.json`
+- **SocketCAN Setup**: `scripts/can0_up.sh`
+
