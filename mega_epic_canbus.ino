@@ -159,12 +159,13 @@ void loop()
         }
 
         // Pack D20..D34 into 15-bit field (bit0=D20 ... bit14=D34)
+        // Inverted logic: LOW (grounded) = 1, HIGH (pullup active/unconnected) = 0
         uint16_t bits = 0;
         for (uint8_t pin = 20; pin <= 34; ++pin)
         {
             uint8_t bitIndex = (uint8_t)(pin - 20);
             int state = digitalRead(pin);
-            if (state == HIGH)
+            if (state == LOW)  // Grounded = report as 1
             {
                 bits |= (uint16_t)(1u << bitIndex);
             }
