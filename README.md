@@ -263,18 +263,18 @@ See `.project/epic_can_bus_spec.txt` for complete protocol specification.
 
 ```
 MEGA_EPIC_CANBUS/
-├── mega_epic_canbus.ino    # Main firmware file
-├── README.md                # This file
-├── PIN_ASSIGNMENT.md        # Pin map and wiring diagrams
-├── WIRING_DIAGRAMS.md       # Complete printable wiring diagrams
-├── CONFIGURATION.md         # Configuration guide
-├── TROUBLESHOOTING.md       # Troubleshooting guide
-├── TECHNICAL.md             # Technical documentation
-├── INSTALLATION.md          # Installation instructions
-└── .project/                # Internal documentation
-    ├── developmentPlan.md
-    ├── progress.md
-    └── epic_can_bus_spec.txt
++-- mega_epic_canbus.ino    # Main firmware file
++-- README.md                # This file
++-- PIN_ASSIGNMENT.md        # Pin map and wiring diagrams
++-- WIRING_DIAGRAMS.md       # Complete printable wiring diagrams
++-- CONFIGURATION.md         # Configuration guide
++-- TROUBLESHOOTING.md       # Troubleshooting guide
++-- TECHNICAL.md             # Technical documentation
++-- INSTALLATION.md          # Installation instructions
++-- .project/                # Internal documentation
+    +-- developmentPlan.md
+    +-- progress.md
+    +-- epic_can_bus_spec.txt
 ```
 
 ## Development Status

@@ -58,7 +58,7 @@ This branch is already configured for Seeed Studio CAN-BUS Shield v2.0:
 
 ```
 Arduino Mega2560    Seeed Studio CAN-BUS Shield v2.0
-─────────────────────────────────────────────────────
+-----------------------------------------------------
 D10 (SS)            CS (Chip Select) - SPI CS
 D11 (MOSI)          SI (SPI In) - MOSI
 D12 (MISO)          SO (SPI Out) - MISO

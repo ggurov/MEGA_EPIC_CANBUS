@@ -91,31 +91,31 @@ Step-by-step guide for installing and setting up MEGA_EPIC_CANBUS firmware.
 
 ```
 BEFORE:
-┌──────────────┐
-│   Arduino    │
-│   Mega2560   │
-│              │
-│  [Pins]      │
-│  [Pins]      │
-└──────────────┘
++--------------+
+|   Arduino    |
+|   Mega2560   |
+|              |
+|  [Pins]      |
+|  [Pins]      |
++--------------+
 
-    │ Align pins carefully
-    │ Push down firmly
-    │
-    ▼
+    | Align pins carefully
+    | Push down firmly
+    |
+    v
 
 AFTER:
-┌──────────────┐
-│   Arduino    │
-│   Mega2560   │
-│              │
-│  ┌─────────┐│
-│  │  Shield ││
-│  │  MCP2515││
-│  │  CAN    ││
-│  └─────────┘│
-│              │
-└──────────────┘
++--------------+
+|   Arduino    |
+|   Mega2560   |
+|              |
+|  +---------+|
+|  |  Shield ||
+|  |  MCP2515||
+|  |  CAN    ||
+|  +---------+|
+|              |
++--------------+
 ```
 
 **Steps:**
@@ -129,16 +129,16 @@ AFTER:
 
 ```
 CAN BUS CONNECTION:
-┌──────────────┐          ┌──────────────┐
-│ epicEFI ECU  │          │  Arduino     │
-│              │          │  Mega2560    │
-│  CAN_H ──────┼──────────┼──► CAN_H     │
-│  CAN_L ──────┼──────────┼──► CAN_L     │
-│  GND   ──────┼──────────┼──► GND       │
-│              │          │              │
-│ [120Ω]       │          │              │
-│ Terminator   │          │              │
-└──────────────┘          └──────────────┘
++--------------+          +--------------+
+| epicEFI ECU  |          |  Arduino     |
+|              |          |  Mega2560    |
+|  CAN_H ------+----------+--> CAN_H     |
+|  CAN_L ------+----------+--> CAN_L     |
+|  GND   ------+----------+--> GND       |
+|              |          |              |
+| [120Ω]       |          |              |
+| Terminator   |          |              |
++--------------+          +--------------+
 ```
 
 **Steps:**
@@ -161,25 +161,25 @@ CAN BUS CONNECTION:
 
 1. **Analog Inputs** (A0-A15):
 ```
-Sensor Signal ──────────► Arduino A0-A15
-Sensor GND    ──────────► Arduino GND
-Sensor VCC    ──────────► Arduino 5V (or external)
+Sensor Signal ----------> Arduino A0-A15
+Sensor GND    ----------> Arduino GND
+Sensor VCC    ----------> Arduino 5V (or external)
 ```
 
 2. **Digital Inputs** (D20-D34):
 ```
-Button Terminal 1 ──────► Arduino D20-D34
-Button Terminal 2 ──────► Arduino GND (LOW = active)
+Button Terminal 1 ------> Arduino D20-D34
+Button Terminal 2 ------> Arduino GND (LOW = active)
 ```
 
 3. **Digital Outputs** (D35-D49):
 ```
-Arduino D35-D49 ──► [Driver] ──► [Load/Relay]
+Arduino D35-D49 --> [Driver] --> [Load/Relay]
 ```
 
 4. **PWM Outputs** (D2-D8, D10-D13, D44-D46):
 ```
-Arduino PWM Pin ──► [Motor Driver] ──► [Motor/Actuator]
+Arduino PWM Pin --> [Motor Driver] --> [Motor/Actuator]
 ```
 
 See `PIN_ASSIGNMENT.md` and `WIRING_DIAGRAMS.md` for detailed wiring diagrams.
