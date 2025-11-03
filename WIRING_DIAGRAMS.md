@@ -494,7 +494,7 @@ TERMINATION:
   Creates 60Ω total impedance (120Ω || 120Ω)
 ```
 
-### MCP_CAN Shield Connection
+### Seeed Studio CAN-BUS Shield v2.0 Connection
 
 ```
 ARDUINO MEGA2560 TOP VIEW
@@ -503,7 +503,7 @@ ARDUINO MEGA2560 TOP VIEW
 │  ┌──────────────────────┐ │
 │  │  Arduino Pins        │ │
 │  │                      │ │
-│  │  D9  ────────────────┼─┼──► Not used (available)
+│  │  D9  ────────────────┼─┼──► Not used (available for other uses)
 │  │  D10 ────────────────┼─┼──► SPI CS (to MCP2515) - Seeed Studio shield
 │  │  D11 ────────────────┼─┼──► SPI MOSI (to MCP2515)
 │  │  D12 ────────────────┼─┼──► SPI MISO (from MCP2515)
@@ -517,12 +517,13 @@ ARDUINO MEGA2560 TOP VIEW
             │ into Arduino header
             ▼
 ┌────────────────────────────┐
-│   MCP_CAN SHIELD           │
+│  SEEED STUDIO CAN-BUS      │
+│  SHIELD V2.0               │
 │                            │
 │  ┌──────────────────────┐ │
 │  │  MCP2515 Chip        │ │
 │  │                      │ │
-│  │  CS  ◄────────────────┼── D10 (Seeed Studio shield)
+│  │  CS  ◄────────────────┼── D10
 │  │  SI  ◄────────────────┼── D11 (MOSI)
 │  │  SO  ────────────────┼──► D12 (MISO)
 │  │  SCK ◄────────────────┼── D13
@@ -531,17 +532,26 @@ ARDUINO MEGA2560 TOP VIEW
 │                            │
 │  ┌──────────────────────┐ │
 │  │  CAN Transceiver      │ │
-│  │  (MCP2551 or similar)│ │
+│  │  (MCP2551)           │ │
 │  │                      │ │
+│  │  Connection Options:  │ │
+│  │                       │ │
+│  │  Option 1 - Screw     │ │
+│  │  Terminals:           │ │
 │  │  CAN_H ──────────────┼──► To CAN Bus High
 │  │  CAN_L ──────────────┼──► To CAN Bus Low
-│  │  GND   ──────────────┼──► To CAN Bus Ground
+│  │                      │ │
+│  │  Option 2 - 9-pin     │ │
+│  │  D-sub Connector:     │ │
+│  │  (OBD-II/CAN standard)│ │
 │  │                      │ │
 │  └──────────────────────┘ │
 │                            │
 │  ┌──────────────────────┐ │
-│  │  Termination Resistor │ │
-│  │  (120Ω - if on shield)│ │
+│  │  Features:           │ │
+│  │  - Termination Jumper│ │
+│  │  - Grove Connectors │ │
+│  │  - LED Indicators    │ │
 │  └──────────────────────┘ │
 │                            │
 └────────────────────────────┘
