@@ -68,8 +68,11 @@
 #include <stdint.h>
 #include <EEPROM.h>
 
-// Please modify SPI_CS_PIN to adapt to your board (see table below)
-#define SPI_CS_PIN  9 
+// Please modify SPI_CS_PIN to adapt to your board:
+//   - Longan Labs CAN Bus Shield: D9 (default)
+//   - Seeed Studio CAN-BUS Shield v2.0: D10
+//   - Other shields: Check shield documentation
+#define SPI_CS_PIN  9  // Change to 10 for Seeed Studio CAN-BUS Shield v2.0 
 
 MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 

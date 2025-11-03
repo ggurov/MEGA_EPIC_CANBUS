@@ -11,9 +11,12 @@ Step-by-step guide for installing and setting up MEGA_EPIC_CANBUS firmware.
    - Verify board works (upload Blink example first)
 
 2. **MCP_CAN Shield** (MCP2515-based CAN controller)
-   - Recommended: CAN Bus Shield from Longan Labs
-   - Alternative: Other MCP2515-based CAN shields
+   - **Supported Shields:**
+     - **Longan Labs CAN Bus Shield** (default, CS pin D9) ✅ Recommended
+     - **Seeed Studio CAN-BUS Shield v2.0** (CS pin D10) ✅ Compatible
+     - Other MCP2515-based shields (may require CS pin configuration)
    - Verify shield has MCP2515 chip
+   - **If using Seeed Studio shield:** See `SHIELD_COMPATIBILITY.md` for setup
 
 3. **CAN Bus Cables**
    - CAN_H, CAN_L, GND wires
