@@ -58,6 +58,11 @@ MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 #define ENABLE_ADC_CALIBRATION false      // Set to true to enable ADC calibration
 #define ENABLE_EEPROM_CONFIG true         // Enable EEPROM configuration storage
 
+// Testing and diagnostics configuration
+#define ENABLE_TEST_MODE false            // Set to true to enable test mode (I/O patterns, diagnostics)
+#define ENABLE_SERIAL_COMMANDS false      // Set to true to enable serial command interface
+#define PERFORMANCE_STATS_INTERVAL_MS 10000  // Print performance stats every 10 seconds (0 = disabled)
+
 // Interrupt counter pins (INT3=18, INT2=19) - also UART1 pins, use if UART not needed
 #define COUNTER_PIN_1 18  // INT3
 #define COUNTER_PIN_2 19  // INT2
@@ -120,6 +125,19 @@ static uint32_t canTxSuccessCount = 0;      // CAN TX success counter
 static uint32_t canTxFailureCount = 0;      // CAN TX failure counter
 static uint32_t canRxCount = 0;             // CAN RX frame counter
 static uint32_t canRxErrorCount = 0;        // CAN RX error counter (invalid frames)
+
+// Performance statistics (for testing/validation)
+static unsigned long statsStartTimeMs = 0;  // Statistics collection start time
+static uint32_t statsStartTxSuccess = 0;    // TX success count at stats start
+static uint32_t statsStartTxFailure = 0;    // TX failure count at stats start
+static uint32_t statsStartRxCount = 0;      // RX count at stats start
+static uint32_t statsStartRxError = 0;      // RX error count at stats start
+
+// Test mode variables
+#if ENABLE_TEST_MODE
+static bool testModeActive = false;
+static unsigned long testModeStartMs = 0;
+#endif
 
 // Interrupt counters (optional feature)
 #if ENABLE_INTERRUPT_COUNTERS
@@ -561,9 +579,225 @@ void setup()
     Serial.println(ENABLE_ADC_CALIBRATION ? "ENABLED" : "DISABLED");
     Serial.print("EEPROM Config: ");
     Serial.println(ENABLE_EEPROM_CONFIG ? "ENABLED" : "DISABLED");
+    Serial.print("Test Mode: ");
+    Serial.println(ENABLE_TEST_MODE ? "ENABLED" : "DISABLED");
     Serial.println("=====================\n");
+    
+    // Initialize performance statistics collection
+    statsStartTimeMs = millis();
+    statsStartTxSuccess = canTxSuccessCount;
+    statsStartTxFailure = canTxFailureCount;
+    statsStartRxCount = canRxCount;
+    statsStartRxError = canRxErrorCount;
 }
 
+
+// Testing and validation utilities
+
+// Print comprehensive performance statistics
+static void printPerformanceStats(void)
+{
+    unsigned long elapsed = millis() - statsStartTimeMs;
+    if (elapsed == 0) elapsed = 1;  // Avoid division by zero
+    
+    uint32_t txSuccess = canTxSuccessCount - statsStartTxSuccess;
+    uint32_t txFailure = canTxFailureCount - statsStartTxFailure;
+    uint32_t rxFrames = canRxCount - statsStartRxCount;
+    uint32_t rxErrors = canRxErrorCount - statsStartRxError;
+    
+    float txRate = (float)txSuccess * 1000.0 / (float)elapsed;
+    float rxRate = (float)rxFrames * 1000.0 / (float)elapsed;
+    float errorRate = (rxFrames > 0) ? ((float)rxErrors * 100.0 / (float)rxFrames) : 0.0;
+    
+    Serial.println("\n=== Performance Statistics ===");
+    Serial.print("Elapsed time: ");
+    Serial.print(elapsed / 1000);
+    Serial.println(" seconds");
+    Serial.print("CAN TX Success: ");
+    Serial.print(txSuccess);
+    Serial.print(" (");
+    Serial.print(txRate, 1);
+    Serial.println(" frames/sec)");
+    Serial.print("CAN TX Failures: ");
+    Serial.println(txFailure);
+    Serial.print("CAN RX Frames: ");
+    Serial.print(rxFrames);
+    Serial.print(" (");
+    Serial.print(rxRate, 1);
+    Serial.println(" frames/sec)");
+    Serial.print("CAN RX Errors: ");
+    Serial.print(rxErrors);
+    Serial.print(" (");
+    Serial.print(errorRate, 2);
+    Serial.println("%)");
+    Serial.print("ECU Communication: ");
+    Serial.println(ecuCommunicationLost ? "LOST" : "OK");
+    if (lastEcuResponseMs > 0)
+    {
+        Serial.print("Last ECU response: ");
+        Serial.print((millis() - lastEcuResponseMs) / 1000);
+        Serial.println(" seconds ago");
+    }
+    Serial.println("=============================\n");
+}
+
+// Self-test: Verify analog inputs
+static void testAnalogInputs(void)
+{
+    Serial.println("\n=== Analog Input Test ===");
+    for (uint8_t i = 0; i < 16; ++i)
+    {
+        int adc = analogRead(A0 + i);
+        float voltage = (adc / 1023.0) * 5.0;
+        Serial.print("A");
+        Serial.print(i);
+        Serial.print(": ADC=");
+        Serial.print(adc);
+        Serial.print(" (");
+        Serial.print(voltage, 2);
+        Serial.println("V)");
+    }
+    Serial.println("========================\n");
+}
+
+// Self-test: Verify digital inputs
+static void testDigitalInputs(void)
+{
+    Serial.println("\n=== Digital Input Test ===");
+    uint16_t bits = 0;
+    for (uint8_t pin = 20; pin <= 34; ++pin)
+    {
+        int state = digitalRead(pin);
+        uint8_t bitIndex = pin - 20;
+        if (state == LOW)
+        {
+            bits |= (1u << bitIndex);
+        }
+        Serial.print("D");
+        Serial.print(pin);
+        Serial.print(": ");
+        Serial.println(state == LOW ? "LOW (active)" : "HIGH (inactive)");
+    }
+    Serial.print("Bitfield: 0x");
+    Serial.println(bits, HEX);
+    Serial.println("========================\n");
+}
+
+// Self-test: Test digital outputs (cycling pattern)
+static void testDigitalOutputs(void)
+{
+    Serial.println("Testing digital outputs D35-D49...");
+    Serial.println("Watch outputs - should cycle through pattern");
+    
+    // Pattern: All OFF, All ON, Walking pattern
+    for (uint8_t cycle = 0; cycle < 3; ++cycle)
+    {
+        // All OFF
+        for (uint8_t pin = 35; pin <= 49; ++pin)
+        {
+            digitalWrite(pin, LOW);
+        }
+        delay(500);
+        
+        // All ON
+        for (uint8_t pin = 35; pin <= 49; ++pin)
+        {
+            digitalWrite(pin, HIGH);
+        }
+        delay(500);
+        
+        // Walking pattern
+        for (uint8_t pin = 35; pin <= 49; ++pin)
+        {
+            for (uint8_t p = 35; p <= 49; ++p)
+            {
+                digitalWrite(p, (p == pin) ? HIGH : LOW);
+            }
+            delay(100);
+        }
+    }
+    
+    // Return to safe state
+    enterSafeMode();
+    Serial.println("Digital output test complete - outputs returned to safe state");
+}
+
+// Self-test: Test PWM outputs (sweep pattern)
+static void testPwmOutputs(void)
+{
+    Serial.println("Testing PWM outputs...");
+    Serial.println("Watch outputs - should sweep from 0% to 100%");
+    
+    // Sweep each PWM channel from 0% to 100%
+    for (uint8_t i = 0; i < 14; ++i)
+    {
+        Serial.print("Testing PWM D");
+        Serial.print(PWM_PINS[i]);
+        Serial.println("...");
+        
+        for (uint8_t duty = 0; duty <= 255; duty += 5)
+        {
+            analogWrite(PWM_PINS[i], duty);
+            delay(20);
+        }
+        delay(500);
+        analogWrite(PWM_PINS[i], 0);
+        delay(200);
+    }
+    
+    Serial.println("PWM output test complete - outputs returned to safe state");
+}
+
+// Serial command parser (if enabled)
+#if ENABLE_SERIAL_COMMANDS
+static void processSerialCommand(void)
+{
+    if (Serial.available())
+    {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        cmd.toUpperCase();
+        
+        if (cmd == "STATS" || cmd == "S")
+        {
+            printPerformanceStats();
+        }
+        else if (cmd == "TESTANALOG" || cmd == "TA")
+        {
+            testAnalogInputs();
+        }
+        else if (cmd == "TESTDIGITAL" || cmd == "TD")
+        {
+            testDigitalInputs();
+        }
+        else if (cmd == "TESTOUTPUTS" || cmd == "TO")
+        {
+            testDigitalOutputs();
+        }
+        else if (cmd == "TESTPWM" || cmd == "TP")
+        {
+            testPwmOutputs();
+        }
+        else if (cmd == "HELP" || cmd == "H" || cmd == "?")
+        {
+            Serial.println("\n=== Serial Commands ===");
+            Serial.println("STATS (S)     - Print performance statistics");
+            Serial.println("TESTANALOG (TA) - Test analog inputs A0-A15");
+            Serial.println("TESTDIGITAL (TD) - Test digital inputs D20-D34");
+            Serial.println("TESTOUTPUTS (TO) - Test digital outputs D35-D49");
+            Serial.println("TESTPWM (TP)  - Test PWM outputs");
+            Serial.println("HELP (H, ?)   - Show this help");
+            Serial.println("======================\n");
+        }
+        else if (cmd.length() > 0)
+        {
+            Serial.print("Unknown command: ");
+            Serial.println(cmd);
+            Serial.println("Type HELP for available commands");
+        }
+    }
+}
+#endif
 
 // Safe mode: Set all outputs to safe states
 static void enterSafeMode(void)
@@ -911,6 +1145,63 @@ void loop()
             attempts++;
         }
     }
+    
+    // Serial command processing (if enabled)
+    #if ENABLE_SERIAL_COMMANDS
+    processSerialCommand();
+    #endif
+    
+    // Performance statistics reporting (if enabled)
+    #if PERFORMANCE_STATS_INTERVAL_MS > 0
+    static unsigned long lastStatsPrintMs = 0;
+    if (nowMs - lastStatsPrintMs >= PERFORMANCE_STATS_INTERVAL_MS)
+    {
+        lastStatsPrintMs = nowMs;
+        printPerformanceStats();
+    }
+    #endif
+    
+    // Test mode: I/O pattern testing (if enabled)
+    #if ENABLE_TEST_MODE
+    static unsigned long testPatternMs = 0;
+    static uint8_t testPatternState = 0;
+    
+    if (!testModeActive)
+    {
+        testModeActive = true;
+        testModeStartMs = nowMs;
+        Serial.println("TEST MODE ACTIVE - Running I/O test patterns");
+        Serial.println("Set ENABLE_TEST_MODE=false to disable");
+    }
+    
+    // Simple test pattern: cycle digital outputs every 2 seconds
+    if (nowMs - testPatternMs >= 2000)
+    {
+        testPatternMs = nowMs;
+        uint16_t pattern = (testPatternState & 1) ? 0xFFFF : 0x0000;
+        testPatternState++;
+        
+        // Apply pattern to digital outputs (if not in safe mode)
+        if (!ecuCommunicationLost)
+        {
+            for (uint8_t pin = 35; pin <= 49; ++pin)
+            {
+                uint8_t bitIndex = pin - 35;
+                digitalWrite(pin, (pattern >> bitIndex) & 1 ? HIGH : LOW);
+            }
+        }
+        
+        // Cycle PWM outputs (0%, 25%, 50%, 75%, 100%)
+        uint8_t pwmDuty = ((testPatternState / 2) % 5) * 51;  // 0, 51, 102, 153, 204
+        for (uint8_t i = 0; i < 14; ++i)
+        {
+            if (!ecuCommunicationLost)
+            {
+                analogWrite(PWM_PINS[i], pwmDuty);
+            }
+        }
+    }
+    #endif
     
     // Interrupt Counter Reporting (if enabled)
     #if ENABLE_INTERRUPT_COUNTERS
