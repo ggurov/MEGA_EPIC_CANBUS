@@ -22,11 +22,10 @@ Arduino Mega2560 firmware that expands I/O capabilities of epicEFI ECUs via CAN 
 ## Hardware Requirements
 
 - **Arduino Mega2560** (or compatible)
-- **MCP_CAN Shield** (MCP2515-based CAN controller)
-  - **Supported Shields:**
-    - Longan Labs CAN Bus Shield (default, CS pin D9)
-    - Seeed Studio CAN-BUS Shield v2.0 (change CS pin to D10, see below)
-  - SPI CS pin: D9 (default for Longan Labs), D10 (for Seeed Studio)
+- **Seeed Studio CAN-BUS Shield v2.0** (MCP2515-based CAN controller)
+  - SPI CS pin: D10 (configured for Seeed Studio shield)
+  - Features: 9-pin D-sub connector, screw terminals, Grove connectors
+  - Product: https://www.seeedstudio.com/CAN-BUS-Shield-V2.html
 - **CAN Bus Termination** - 120Ω resistor at each end of bus
 - **Power Supply** - 7-12V DC via barrel jack or VIN pin
 

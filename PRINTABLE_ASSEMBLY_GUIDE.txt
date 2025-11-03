@@ -21,14 +21,14 @@ STEP 1: PREPARE HARDWARE
 
 Required Components:
   [ ] Arduino Mega2560 (or compatible)
-  [ ] MCP_CAN Shield (MCP2515-based CAN controller)
+  [ ] Seeed Studio CAN-BUS Shield v2.0 (MCP2515-based CAN controller)
   [ ] CAN Bus Cables (CAN_H, CAN_L, GND)
   [ ] 120Ω Termination Resistors (2 total)
   [ ] Power Supply (7-12V DC, 1-2A capacity)
   [ ] Sensors and actuators for your application
   [ ] USB Cable (for firmware upload)
 
-STEP 2: INSTALL MCP_CAN SHIELD
+STEP 2: INSTALL SEEED STUDIO CAN-BUS SHIELD V2.0
 ───────────────────────────────────────────────────────────────────────────────
 
 BEFORE INSTALLATION:
@@ -54,9 +54,10 @@ AFTER INSTALLATION:
 │   Mega2560   │
 │              │
 │  ┌─────────┐│
-│  │  Shield ││
-│  │  MCP2515││
+│  │  Seeed  ││
+│  │  Studio ││
 │  │  CAN    ││
+│  │  Shield ││
 │  └─────────┘│
 │              │
 └──────────────┘
@@ -65,7 +66,8 @@ VERIFICATION:
   [ ] Shield sits flush on Arduino (no gaps)
   [ ] All pins are properly connected
   [ ] No bent or damaged pins
-  [ ] Shield power LED lights up (if present)
+  [ ] Shield LED indicators work (if present)
+  [ ] 9-pin D-sub connector accessible (if needed)
 
 STEP 3: CONNECT CAN BUS
 ───────────────────────────────────────────────────────────────────────────────
@@ -496,7 +498,7 @@ PWM Outputs      D2-D8, D10-D13,     14     8-bit PWM
                  D44-D46
 Interrupt        D18, D19             2     Optional (wheel speed)
 Counters
-SPI (CAN)        D9, D10-D13           5     MCP2515 CAN controller
+SPI (CAN)        D10-D13              4     MCP2515 CAN controller (Seeed Studio)
 UART             D0-D1                2     USB Serial (avoid)
 ───────────────────────────────────────────────────────────────────────────────
 
@@ -513,8 +515,8 @@ ARDUINO MEGA2560 TOP VIEW
 │  ┌──────────────────────┐ │
 │  │  Arduino Pins        │ │
 │  │                      │ │
-│  │  D9  ────────────────┼─┼──► SPI CS (to MCP2515)
-│  │  D10 ────────────────┼─┼──► SPI SS (not used, leave HIGH)
+│  │  D9  ────────────────┼─┼──► Not used (available)
+│  │  D10 ────────────────┼─┼──► SPI CS (to MCP2515) - Seeed Studio
 │  │  D11 ────────────────┼─┼──► SPI MOSI (to MCP2515)
 │  │  D12 ────────────────┼─┼──► SPI MISO (from MCP2515)
 │  │  D13 ────────────────┼─┼──► SPI SCK (to MCP2515)
@@ -532,7 +534,7 @@ ARDUINO MEGA2560 TOP VIEW
 │  ┌──────────────────────┐ │
 │  │  MCP2515 Chip        │ │
 │  │                      │ │
-│  │  CS  ◄────────────────┼── D9
+│  │  CS  ◄────────────────┼── D10 (Seeed Studio shield)
 │  │  SI  ◄────────────────┼── D11 (MOSI)
 │  │  SO  ────────────────┼──► D12 (MISO)
 │  │  SCK ◄────────────────┼── D13

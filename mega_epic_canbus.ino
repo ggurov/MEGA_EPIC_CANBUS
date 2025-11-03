@@ -11,8 +11,8 @@
     
     Hardware:
     - Arduino Mega2560 (or compatible)
-    - MCP_CAN Shield (MCP2515-based CAN controller)
-    - SPI CS Pin: D9 (default, configurable)
+    - Seeed Studio CAN-BUS Shield v2.0 (MCP2515-based CAN controller)
+    - SPI CS Pin: D10 (Seeed Studio default)
     
     I/O Capabilities:
     - 16 Analog Inputs (A0-A15): 10-bit ADC, 0-5V
@@ -35,7 +35,7 @@
                            0x740 (func_request), 0x760 (func_response),
                            0x780 (var_set)
     - Data Format: Big-endian byte order, Float32 IEEE 754
-    
+
     CAN Baudrate,
     
     #define CAN_5KBPS           1
@@ -57,10 +57,9 @@
     #define CAN_666KBPS         17
     #define CAN_1000KBPS        18
 
-    CANBed V1: https://www.longan-labs.cc/1030008.html
-    CANBed M0: https://www.longan-labs.cc/1030014.html
-    CAN Bus Shield: https://www.longan-labs.cc/1030016.html
-    OBD-II CAN Bus GPS Dev Kit: https://www.longan-labs.cc/1030003.html
+    Seeed Studio CAN-BUS Shield v2.0:
+    Product Page: https://www.seeedstudio.com/CAN-BUS-Shield-V2.html
+    Wiki: https://wiki.seeedstudio.com/CAN-BUS_Shield_V2.0/
 */
 
 #include <SPI.h>
@@ -68,11 +67,11 @@
 #include <stdint.h>
 #include <EEPROM.h>
 
-// Please modify SPI_CS_PIN to adapt to your board:
-//   - Longan Labs CAN Bus Shield: D9 (default)
-//   - Seeed Studio CAN-BUS Shield v2.0: D10
-//   - Other shields: Check shield documentation
-#define SPI_CS_PIN  9  // Change to 10 for Seeed Studio CAN-BUS Shield v2.0 
+// Seeed Studio CAN-BUS Shield v2.0 Configuration:
+//   - CS Pin: D10 (Seeed Studio default)
+//   - Library: mcp_can (by Longan Labs - compatible)
+//   - Other shields: Change CS pin as needed
+#define SPI_CS_PIN  10  // Seeed Studio CAN-BUS Shield v2.0 default 
 
 MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 
@@ -1091,13 +1090,13 @@ void loop()
             
             if (change >= ANALOG_CHANGE_THRESHOLD || heartbeatDue)
             {
-                sendVariableSetFrame(VAR_HASH_ANALOG[i], value);
+            sendVariableSetFrame(VAR_HASH_ANALOG[i], value);
                 previousAnalogValues[i] = value;  // Update previous value
                 
                 // Optional debug output (comment out for production)
                 // Serial.print("Analog A");
-                // Serial.print(i);
-                // Serial.print(": ");
+            // Serial.print(i);
+            // Serial.print(": ");
                 // Serial.print(value);
                 // if (heartbeatDue) Serial.print(" (heartbeat)");
                 // Serial.println();
@@ -1126,7 +1125,7 @@ void loop()
         // Transmit digital inputs only if state changed (change detection)
         if (bits != previousDigitalBits || !DIGITAL_CHANGE_ONLY)
         {
-            sendVariableSetFrame(VAR_HASH_D20_D34, (float)bits);
+        sendVariableSetFrame(VAR_HASH_D20_D34, (float)bits);
             previousDigitalBits = bits;  // Update previous state
             
             // Optional debug output (comment out for production)

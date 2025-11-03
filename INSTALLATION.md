@@ -10,13 +10,13 @@ Step-by-step guide for installing and setting up MEGA_EPIC_CANBUS firmware.
    - Must be genuine Arduino or compatible clone
    - Verify board works (upload Blink example first)
 
-2. **MCP_CAN Shield** (MCP2515-based CAN controller)
-   - **Supported Shields:**
-     - **Longan Labs CAN Bus Shield** (default, CS pin D9) ✅ Recommended
-     - **Seeed Studio CAN-BUS Shield v2.0** (CS pin D10) ✅ Compatible
-     - Other MCP2515-based shields (may require CS pin configuration)
-   - Verify shield has MCP2515 chip
-   - **If using Seeed Studio shield:** See `SHIELD_COMPATIBILITY.md` for setup
+2. **Seeed Studio CAN-BUS Shield v2.0** (MCP2515-based CAN controller)
+   - **This branch is configured for Seeed Studio CAN-BUS Shield v2.0**
+   - CS pin: D10 (pre-configured)
+   - Features: 9-pin D-sub connector, screw terminals for CAN_H/CAN_L
+   - Grove connectors: I2C and UART
+   - Product: https://www.seeedstudio.com/CAN-BUS-Shield-V2.html
+   - Wiki: https://wiki.seeedstudio.com/CAN-BUS_Shield_V2.0/
 
 3. **CAN Bus Cables**
    - CAN_H, CAN_L, GND wires
@@ -201,8 +201,9 @@ See `PIN_ASSIGNMENT.md` and `WIRING_DIAGRAMS.md` for detailed wiring diagrams.
    - Linux/Mac: /dev/ttyACM0, /dev/ttyUSB0, etc.
 
 3. **Verify SPI CS Pin:**
-   - Check `#define SPI_CS_PIN 9` matches your shield
-   - Some shields use D10 - check shield documentation
+   - This branch uses `#define SPI_CS_PIN 10` (Seeed Studio default)
+   - No changes needed if using Seeed Studio CAN-BUS Shield v2.0
+   - Verify shield is properly seated on Arduino
 
 ## Step 8: Upload Firmware
 

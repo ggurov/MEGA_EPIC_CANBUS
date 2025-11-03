@@ -130,10 +130,10 @@ Complete pin assignment and wiring guide for MEGA_EPIC_CANBUS firmware.
 - **D12 (MISO)**: SPI Master In Slave Out
 - **D13 (SCK)**: SPI Serial Clock
 
-**Wiring (MCP_CAN Shield):**
-- Shield typically plugs directly into Arduino
-- Verify CS pin matches shield (D9 default)
-- CAN_H and CAN_L connect to CAN bus
+**Wiring (Seeed Studio CAN-BUS Shield v2.0):**
+- Shield plugs directly into Arduino Mega2560
+- CS pin is D10 (pre-configured for Seeed Studio shield)
+- CAN_H and CAN_L connect via screw terminals or 9-pin D-sub connector
 
 **CAN Bus Wiring:**
 - CAN_H → CAN bus high line
@@ -150,7 +150,7 @@ Complete pin assignment and wiring guide for MEGA_EPIC_CANBUS firmware.
 
 **Avoid Using:**
 - **D0-D1**: UART0 (USB Serial - used by Serial Monitor)
-- **D9**: SPI CS for MCP2515 (unless shield uses different pin)
+- **D10**: SPI CS for MCP2515 (Seeed Studio CAN-BUS Shield v2.0)
 - **D10 (SS)**: SPI Slave Select (leave as OUTPUT, HIGH)
 - **D18-D19**: UART1 (also used for interrupt counters if enabled)
 - **D20-D21**: I2C SDA/SCL (also used for digital inputs)

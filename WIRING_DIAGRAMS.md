@@ -88,7 +88,7 @@ Complete ASCII art wiring diagrams for MEGA_EPIC_CANBUS installation.
 PIN FUNCTION LEGEND:
 D0-D1:   UART0 (USB Serial - avoid)
 D2-D8:   PWM Outputs
-D9:      SPI CS (MCP2515 CAN controller)
+D10:     SPI CS (MCP2515 CAN controller) - Seeed Studio CAN-BUS Shield v2.0
 D10-D13: PWM Outputs + SPI
 D18-D19: Interrupt Counters (optional) or UART1
 D20-D34: Digital Inputs
@@ -503,8 +503,8 @@ ARDUINO MEGA2560 TOP VIEW
 │  ┌──────────────────────┐ │
 │  │  Arduino Pins        │ │
 │  │                      │ │
-│  │  D9  ────────────────┼─┼──► SPI CS (to MCP2515)
-│  │  D10 ────────────────┼─┼──► SPI SS (not used, leave HIGH)
+│  │  D9  ────────────────┼─┼──► Not used (available)
+│  │  D10 ────────────────┼─┼──► SPI CS (to MCP2515) - Seeed Studio shield
 │  │  D11 ────────────────┼─┼──► SPI MOSI (to MCP2515)
 │  │  D12 ────────────────┼─┼──► SPI MISO (from MCP2515)
 │  │  D13 ────────────────┼─┼──► SPI SCK (to MCP2515)
@@ -522,7 +522,7 @@ ARDUINO MEGA2560 TOP VIEW
 │  ┌──────────────────────┐ │
 │  │  MCP2515 Chip        │ │
 │  │                      │ │
-│  │  CS  ◄────────────────┼── D9
+│  │  CS  ◄────────────────┼── D10 (Seeed Studio shield)
 │  │  SI  ◄────────────────┼── D11 (MOSI)
 │  │  SO  ────────────────┼──► D12 (MISO)
 │  │  SCK ◄────────────────┼── D13
