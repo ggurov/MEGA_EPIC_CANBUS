@@ -30,6 +30,7 @@
 #include <SPI.h>
 #include <mcp_canbus.h>
 #include <stdint.h>
+#include <EEPROM.h>
 
 // Please modify SPI_CS_PIN to adapt to your board (see table below)
 #define SPI_CS_PIN  9 
@@ -51,6 +52,23 @@ MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 #define ECU_COMM_TIMEOUT_MS 3000  // ECU communication timeout (3 seconds)
 #define CAN_TX_RETRY_COUNT 2  // Number of retries for CAN TX failures
 #define CAN_TX_RETRY_DELAY_MS 10  // Delay between retries (ms)
+
+// Advanced features configuration flags
+#define ENABLE_INTERRUPT_COUNTERS false  // Set to true to enable interrupt counters (D18, D19)
+#define ENABLE_ADC_CALIBRATION false      // Set to true to enable ADC calibration
+#define ENABLE_EEPROM_CONFIG true         // Enable EEPROM configuration storage
+
+// Interrupt counter pins (INT3=18, INT2=19) - also UART1 pins, use if UART not needed
+#define COUNTER_PIN_1 18  // INT3
+#define COUNTER_PIN_2 19  // INT2
+
+// EEPROM addresses for configuration storage
+#define EEPROM_ADDR_MAGIC       0  // Magic number to detect valid config (4 bytes)
+#define EEPROM_ADDR_ECU_CAN_ID  4  // Stored ECU_CAN_ID (1 byte)
+#define EEPROM_ADDR_CALIBRATION 8  // Start of ADC calibration data (32 bytes: 16 channels * 2 floats)
+
+// EEPROM magic number to validate stored configuration
+#define EEPROM_MAGIC_NUMBER 0x4D455049  // "MEPI" in ASCII
 #define CAN_ID_VAR_REQUEST        (0x700 + ECU_CAN_ID)
 #define CAN_ID_VAR_RESPONSE       (0x720 + ECU_CAN_ID)
 #define CAN_ID_FUNCTION_REQUEST   (0x740 + ECU_CAN_ID)
@@ -102,6 +120,120 @@ static uint32_t canTxSuccessCount = 0;      // CAN TX success counter
 static uint32_t canTxFailureCount = 0;      // CAN TX failure counter
 static uint32_t canRxCount = 0;             // CAN RX frame counter
 static uint32_t canRxErrorCount = 0;        // CAN RX error counter (invalid frames)
+
+// Interrupt counters (optional feature)
+#if ENABLE_INTERRUPT_COUNTERS
+volatile uint32_t interruptCounter1 = 0;  // Counter for D18 (INT3)
+volatile uint32_t interruptCounter2 = 0;  // Counter for D19 (INT2)
+volatile unsigned long lastCounter1TimeMs = 0;  // Timestamp of last counter1 event
+volatile unsigned long lastCounter2TimeMs = 0;  // Timestamp of last counter2 event
+static uint32_t lastReportedCounter1 = 0;  // Last reported counter value
+static uint32_t lastReportedCounter2 = 0;  // Last reported counter value
+#define COUNTER_REPORT_INTERVAL_MS 100  // Report counters every 100ms
+
+// EPIC variable hashes for interrupt counters (TODO: get from variables.json)
+const int32_t VAR_HASH_COUNTER1 = 0;  // PLACEHOLDER
+const int32_t VAR_HASH_COUNTER2 = 0;  // PLACEHOLDER
+
+// Interrupt Service Routines for counters
+void counter1ISR(void)
+{
+    interruptCounter1++;
+    lastCounter1TimeMs = millis();
+}
+
+void counter2ISR(void)
+{
+    interruptCounter2++;
+    lastCounter2TimeMs = millis();
+}
+#endif
+
+// ADC Calibration (optional feature)
+#if ENABLE_ADC_CALIBRATION
+// Calibration structure: offset and gain per channel
+struct AdcCalibration {
+    float offset;  // ADC offset (added to raw value)
+    float gain;    // ADC gain multiplier
+};
+
+static AdcCalibration adcCal[16];  // Calibration for A0-A15
+
+// Apply calibration to ADC value
+static inline float applyAdcCalibration(uint8_t channel, float rawAdc)
+{
+    return (rawAdc + adcCal[channel].offset) * adcCal[channel].gain;
+}
+
+// Load ADC calibration from EEPROM
+static void loadAdcCalibration(void)
+{
+    if (ENABLE_EEPROM_CONFIG)
+    {
+        uint16_t addr = EEPROM_ADDR_CALIBRATION;
+        for (uint8_t i = 0; i < 16; ++i)
+        {
+            EEPROM.get(addr, adcCal[i].offset);
+            addr += sizeof(float);
+            EEPROM.get(addr, adcCal[i].gain);
+            addr += sizeof(float);
+        }
+    }
+}
+
+// Save ADC calibration to EEPROM
+static void saveAdcCalibration(void)
+{
+    if (ENABLE_EEPROM_CONFIG)
+    {
+        uint16_t addr = EEPROM_ADDR_CALIBRATION;
+        for (uint8_t i = 0; i < 16; ++i)
+        {
+            EEPROM.put(addr, adcCal[i].offset);
+            addr += sizeof(float);
+            EEPROM.put(addr, adcCal[i].gain);
+            addr += sizeof(float);
+        }
+    }
+}
+#endif
+
+// EEPROM Configuration Functions
+#if ENABLE_EEPROM_CONFIG
+// Check if EEPROM contains valid configuration
+static bool isEepromConfigValid(void)
+{
+    uint32_t magic;
+    EEPROM.get(EEPROM_ADDR_MAGIC, magic);
+    return (magic == EEPROM_MAGIC_NUMBER);
+}
+
+// Load ECU_CAN_ID from EEPROM (returns default if not configured)
+static uint8_t loadEcuCanId(void)
+{
+    if (isEepromConfigValid())
+    {
+        uint8_t storedId;
+        EEPROM.get(EEPROM_ADDR_ECU_CAN_ID, storedId);
+        if (storedId <= 15)  // Validate range
+        {
+            return storedId;
+        }
+    }
+    return ECU_CAN_ID;  // Return default
+}
+
+// Save ECU_CAN_ID to EEPROM
+static void saveEcuCanId(uint8_t canId)
+{
+    if (canId > 15) return;  // Validate range
+    
+    // Write magic number
+    EEPROM.put(EEPROM_ADDR_MAGIC, (uint32_t)EEPROM_MAGIC_NUMBER);
+    // Write ECU_CAN_ID
+    EEPROM.put(EEPROM_ADDR_ECU_CAN_ID, canId);
+}
+#endif
 
 // PWM output pins (14 total: D2-D8, D10-D13, D44-D46, skipping D9 for MCP_CAN CS)
 const uint8_t PWM_PINS[14] = {
@@ -299,6 +431,33 @@ void setup()
     Serial.begin(115200);
     while(!Serial);
     
+    // Load configuration from EEPROM (if enabled)
+    #if ENABLE_EEPROM_CONFIG
+    if (isEepromConfigValid())
+    {
+        uint8_t loadedCanId = loadEcuCanId();
+        // Note: ECU_CAN_ID is a #define, so we can't change it at runtime
+        // But we can validate and warn if mismatch
+        if (loadedCanId != ECU_CAN_ID)
+        {
+            Serial.print("EEPROM config: ECU_CAN_ID=");
+            Serial.print(loadedCanId);
+            Serial.print(" but code compiled with ECU_CAN_ID=");
+            Serial.println(ECU_CAN_ID);
+        }
+        Serial.println("Configuration loaded from EEPROM");
+    }
+    else
+    {
+        Serial.println("No valid EEPROM configuration found (using defaults)");
+    }
+    #endif
+    
+    // Load ADC calibration (if enabled)
+    #if ENABLE_ADC_CALIBRATION
+    loadAdcCalibration();
+    Serial.println("ADC calibration loaded");
+    #endif
     
     while (CAN_OK != CAN.begin(CAN_500KBPS))    // init can bus : baudrate = 500k
     {
@@ -384,6 +543,25 @@ void setup()
     Serial.print("Analog heartbeat: ");
     Serial.print(ANALOG_HEARTBEAT_INTERVAL_MS);
     Serial.println(" ms");
+    
+    // Initialize interrupt counters (if enabled)
+    #if ENABLE_INTERRUPT_COUNTERS
+    pinMode(COUNTER_PIN_1, INPUT_PULLUP);
+    pinMode(COUNTER_PIN_2, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(COUNTER_PIN_1), counter1ISR, FALLING);  // INT3
+    attachInterrupt(digitalPinToInterrupt(COUNTER_PIN_2), counter2ISR, FALLING);  // INT2
+    Serial.println("Interrupt counters enabled on D18, D19");
+    #endif
+    
+    // Feature status summary
+    Serial.println("\n=== Feature Status ===");
+    Serial.print("Interrupt Counters: ");
+    Serial.println(ENABLE_INTERRUPT_COUNTERS ? "ENABLED" : "DISABLED");
+    Serial.print("ADC Calibration: ");
+    Serial.println(ENABLE_ADC_CALIBRATION ? "ENABLED" : "DISABLED");
+    Serial.print("EEPROM Config: ");
+    Serial.println(ENABLE_EEPROM_CONFIG ? "ENABLED" : "DISABLED");
+    Serial.println("=====================\n");
 }
 
 
@@ -628,6 +806,11 @@ void loop()
             int adc = analogRead(A0 + i);
             float value = (float)adc;
             
+            // Apply ADC calibration if enabled
+            #if ENABLE_ADC_CALIBRATION
+            value = applyAdcCalibration(i, value);
+            #endif
+            
             // Transmit if: change detected OR heartbeat due
             float change = (value > previousAnalogValues[i]) ? 
                           (value - previousAnalogValues[i]) : 
@@ -728,6 +911,33 @@ void loop()
             attempts++;
         }
     }
+    
+    // Interrupt Counter Reporting (if enabled)
+    #if ENABLE_INTERRUPT_COUNTERS
+    static unsigned long lastCounterReportMs = 0;  // Track last counter report time
+    if (nowMs - lastCounterReportMs >= COUNTER_REPORT_INTERVAL_MS)
+    {
+        lastCounterReportMs = nowMs;
+        
+        // Calculate delta counts (since last report)
+        uint32_t delta1 = interruptCounter1 - lastReportedCounter1;
+        uint32_t delta2 = interruptCounter2 - lastReportedCounter2;
+        
+        // Update last reported values
+        lastReportedCounter1 = interruptCounter1;
+        lastReportedCounter2 = interruptCounter2;
+        
+        // Transmit counter deltas (if configured and non-zero)
+        if (VAR_HASH_COUNTER1 != 0 && delta1 > 0)
+        {
+            sendVariableSetFrame(VAR_HASH_COUNTER1, (float)delta1);
+        }
+        if (VAR_HASH_COUNTER2 != 0 && delta2 > 0)
+        {
+            sendVariableSetFrame(VAR_HASH_COUNTER2, (float)delta2);
+        }
+    }
+    #endif
     
     // ECU Communication Watchdog - Check for communication loss
     unsigned long nowMsComm = millis();
