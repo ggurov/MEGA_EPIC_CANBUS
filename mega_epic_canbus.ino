@@ -41,6 +41,11 @@ MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 #define TRANSMIT_INTERVAL_MS 25
 #define DIGITAL_OUTPUT_POLL_INTERVAL_MS 50  // 20 Hz polling for digital outputs
 #define PWM_POLL_INTERVAL_MS 100  // 10 Hz polling for PWM outputs (14 channels, staggered)
+
+// Performance optimization: Change detection thresholds
+#define ANALOG_CHANGE_THRESHOLD 5.0  // ADC counts - only transmit if change >= this value
+#define ANALOG_HEARTBEAT_INTERVAL_MS 1000  // Send all analog values every 1 second even if unchanged
+#define DIGITAL_CHANGE_ONLY true  // Only transmit digital inputs when state changes (no heartbeat needed for buttons)
 #define CAN_ID_VAR_REQUEST        (0x700 + ECU_CAN_ID)
 #define CAN_ID_VAR_RESPONSE       (0x720 + ECU_CAN_ID)
 #define CAN_ID_FUNCTION_REQUEST   (0x740 + ECU_CAN_ID)
@@ -79,6 +84,11 @@ const int32_t VAR_HASH_D20_D34 = 2136453598;
 // EPIC variable hash for packed digital outputs D35-D49 bitfield
 // TODO: Get actual hash from variables.json - placeholder for now
 const int32_t VAR_HASH_D35_D49 = 0;  // PLACEHOLDER - needs to be set from variables.json
+
+// Performance optimization: Previous value tracking for change detection
+static float previousAnalogValues[16] = {0};  // Track previous ADC values for A0-A15
+static uint16_t previousDigitalBits = 0;      // Track previous digital input bitfield
+static unsigned long lastAnalogHeartbeatMs = 0;  // Last heartbeat transmission time
 
 // PWM output pins (14 total: D2-D8, D10-D13, D44-D46, skipping D9 for MCP_CAN CS)
 const uint8_t PWM_PINS[14] = {
@@ -306,6 +316,33 @@ void setup()
     {
         Serial.println("WARNING: VAR_HASH_PWM[] not set - PWM outputs disabled");
     }
+    
+    // Initialize previous values for change detection
+    // Read all analog inputs once to establish baseline (will trigger first transmission)
+    for (uint8_t i = 0; i < 16; ++i)
+    {
+        previousAnalogValues[i] = (float)analogRead(A0 + i);
+    }
+    
+    // Initialize digital input baseline
+    uint16_t bits = 0;
+    for (uint8_t pin = 20; pin <= 34; ++pin)
+    {
+        uint8_t bitIndex = (uint8_t)(pin - 20);
+        if (digitalRead(pin) == LOW)
+        {
+            bits |= (uint16_t)(1u << bitIndex);
+        }
+    }
+    previousDigitalBits = bits;
+    
+    Serial.println("Performance optimization: Change detection enabled");
+    Serial.print("Analog threshold: ");
+    Serial.print(ANALOG_CHANGE_THRESHOLD);
+    Serial.println(" ADC counts");
+    Serial.print("Analog heartbeat: ");
+    Serial.print(ANALOG_HEARTBEAT_INTERVAL_MS);
+    Serial.println(" ms");
 }
 
 
@@ -460,27 +497,50 @@ void loop()
         processCanFrame(canId, len, buf);
     }
 
-    // Periodic transmission of analog and digital inputs
+    // Periodic transmission of analog and digital inputs with change detection
     static unsigned long lastTxMs = 0;
     static unsigned long lastDigitalOutputRequestMs = 0;
     static unsigned long lastPwmRequestMs = 0;
     static uint8_t currentPwmChannel = 0;  // Current PWM channel to request (0-13)
     unsigned long nowMs = millis();
     
+    // Check if heartbeat interval has elapsed (send all values regardless of change)
+    bool heartbeatDue = (nowMs - lastAnalogHeartbeatMs >= ANALOG_HEARTBEAT_INTERVAL_MS);
+    
     if (nowMs - lastTxMs >= TRANSMIT_INTERVAL_MS)
     {
         lastTxMs = nowMs;
 
-        // Transmit analog inputs A0..A15 (raw ADC counts as float32)
+        // Transmit analog inputs A0..A15 with change detection
         for (uint8_t i = 0; i < 16; ++i)
         {
             int adc = analogRead(A0 + i);
             float value = (float)adc;
-            sendVariableSetFrame(VAR_HASH_ANALOG[i], value);
-            // Serial.print("Analog ");
-            // Serial.print(i);
-            // Serial.print(": ");
-            // Serial.println(value);
+            
+            // Transmit if: change detected OR heartbeat due
+            float change = (value > previousAnalogValues[i]) ? 
+                          (value - previousAnalogValues[i]) : 
+                          (previousAnalogValues[i] - value);
+            
+            if (change >= ANALOG_CHANGE_THRESHOLD || heartbeatDue)
+            {
+                sendVariableSetFrame(VAR_HASH_ANALOG[i], value);
+                previousAnalogValues[i] = value;  // Update previous value
+                
+                // Optional debug output (comment out for production)
+                // Serial.print("Analog A");
+                // Serial.print(i);
+                // Serial.print(": ");
+                // Serial.print(value);
+                // if (heartbeatDue) Serial.print(" (heartbeat)");
+                // Serial.println();
+            }
+        }
+        
+        // Update heartbeat timestamp if heartbeat was sent
+        if (heartbeatDue)
+        {
+            lastAnalogHeartbeatMs = nowMs;
         }
 
         // Pack D20..D34 into 15-bit field (bit0=D20 ... bit14=D34)
@@ -495,7 +555,17 @@ void loop()
                 bits |= (uint16_t)(1u << bitIndex);
             }
         }
-        sendVariableSetFrame(VAR_HASH_D20_D34, (float)bits);
+        
+        // Transmit digital inputs only if state changed (change detection)
+        if (bits != previousDigitalBits || !DIGITAL_CHANGE_ONLY)
+        {
+            sendVariableSetFrame(VAR_HASH_D20_D34, (float)bits);
+            previousDigitalBits = bits;  // Update previous state
+            
+            // Optional debug output (comment out for production)
+            // Serial.print("Digital inputs: 0x");
+            // Serial.println(bits, HEX);
+        }
     }
     
     // Periodic variable_request for digital outputs (D35-D49)
