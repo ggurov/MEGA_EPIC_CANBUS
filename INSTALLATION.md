@@ -86,18 +86,62 @@ Step-by-step guide for installing and setting up MEGA_EPIC_CANBUS firmware.
 
 ### Arduino + Shield Connection
 
+```
+BEFORE:
+┌──────────────┐
+│   Arduino    │
+│   Mega2560   │
+│              │
+│  [Pins]      │
+│  [Pins]      │
+└──────────────┘
+
+    │ Align pins carefully
+    │ Push down firmly
+    │
+    ▼
+
+AFTER:
+┌──────────────┐
+│   Arduino    │
+│   Mega2560   │
+│              │
+│  ┌─────────┐│
+│  │  Shield ││
+│  │  MCP2515││
+│  │  CAN    ││
+│  └─────────┘│
+│              │
+└──────────────┘
+```
+
+**Steps:**
 1. **Power off** Arduino and ECU
-2. Plug MCP_CAN shield into Arduino Mega2560
-   - Align pins carefully
-   - Ensure shield sits flush
-   - Check for bent pins
-3. Verify shield is properly seated
+2. Align shield pins with Arduino header
+3. Press down firmly until shield sits flush
+4. Verify shield is properly seated (no gaps)
+5. Check for bent pins
 
 ### CAN Bus Wiring
 
-1. **CAN_H**: Connect to CAN bus high line
-2. **CAN_L**: Connect to CAN bus low line
-3. **GND**: Connect to CAN bus ground (common ground with ECU)
+```
+CAN BUS CONNECTION:
+┌──────────────┐          ┌──────────────┐
+│ epicEFI ECU  │          │  Arduino     │
+│              │          │  Mega2560    │
+│  CAN_H ──────┼──────────┼──► CAN_H     │
+│  CAN_L ──────┼──────────┼──► CAN_L     │
+│  GND   ──────┼──────────┼──► GND       │
+│              │          │              │
+│ [120Ω]       │          │              │
+│ Terminator   │          │              │
+└──────────────┘          └──────────────┘
+```
+
+**Steps:**
+1. **CAN_H**: Connect shield CAN_H to CAN bus high line
+2. **CAN_L**: Connect shield CAN_L to CAN bus low line
+3. **GND**: Connect shield GND to CAN bus ground
 4. **Termination**: Install 120Ω resistor at Arduino end (if not on shield)
 5. **Termination**: Install 120Ω resistor at ECU end
 
@@ -108,24 +152,34 @@ Step-by-step guide for installing and setting up MEGA_EPIC_CANBUS firmware.
 
 ### I/O Wiring
 
+**See `WIRING_DIAGRAMS.md` for complete printable ASCII wiring diagrams**
+
+**Quick Reference:**
+
 1. **Analog Inputs** (A0-A15):
-   - Sensor output → Arduino analog pin
-   - Sensor GND → Arduino GND
-   - Verify sensor output is 0-5V
+```
+Sensor Signal ──────────► Arduino A0-A15
+Sensor GND    ──────────► Arduino GND
+Sensor VCC    ──────────► Arduino 5V (or external)
+```
 
 2. **Digital Inputs** (D20-D34):
-   - Switch/button → Arduino digital pin
-   - Switch other terminal → GND (LOW = active)
+```
+Button Terminal 1 ──────► Arduino D20-D34
+Button Terminal 2 ──────► Arduino GND (LOW = active)
+```
 
 3. **Digital Outputs** (D35-D49):
-   - Arduino pin → Load (with driver if needed)
-   - Use flyback diodes for inductive loads
+```
+Arduino D35-D49 ──► [Driver] ──► [Load/Relay]
+```
 
 4. **PWM Outputs** (D2-D8, D10-D13, D44-D46):
-   - Arduino pin → Load/Driver
-   - Use appropriate drivers for motors/actuators
+```
+Arduino PWM Pin ──► [Motor Driver] ──► [Motor/Actuator]
+```
 
-See `PIN_ASSIGNMENT.md` for detailed wiring diagrams.
+See `PIN_ASSIGNMENT.md` and `WIRING_DIAGRAMS.md` for detailed wiring diagrams.
 
 ## Step 6: Connect USB
 

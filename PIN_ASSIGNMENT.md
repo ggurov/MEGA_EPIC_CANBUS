@@ -157,64 +157,174 @@ Complete pin assignment and wiring guide for MEGA_EPIC_CANBUS firmware.
 
 ## Wiring Diagrams
 
+**Note:** For detailed printable ASCII wiring diagrams, see `WIRING_DIAGRAMS.md`
+
 ### Typical Sensor Connection
 
 ```
-Sensor (0-5V)
-    |
-    +--[Signal]----> A0 (Analog Input)
-    |
-    +--[GND]-------> Arduino GND
-    |
-    +--[VCC]-------> 5V or External Supply
+ANALOG SENSOR (0-5V)
+┌─────────────┐
+│   Sensor    │
+│   Module    │
+└───┬────┬────┘
+    │    │
+    │    └────────────┐
+    │ Signal          │ VCC
+    │ (0-5V)          │ (+5V)
+    │                 │
+    ▼                 ▼
+  ┌───────────────────────┐
+  │   Arduino Mega2560    │
+  │                       │
+  │  ┌────┐               │
+  │  │ A0 │───────────────┼──► Signal Input
+  │  └────┘               │
+  │                       │
+  │  ┌────┐               │
+  │  │ GND├───────────────┼──► Ground
+  │  └────┘               │
+  │                       │
+  │  ┌────┐               │
+  │  │ 5V ├───────────────┼──► VCC (if needed)
+  │  └────┘               │
+  │                       │
+  └───────────────────────┘
 ```
 
 ### Digital Input (Button)
 
 ```
-Button/Switch
-    |
-    +--[One Terminal]----> D20-D34
-    |
-    +--[Other Terminal]--> GND (LOW = active)
+PUSHBUTTON/SWITCH
+    ┌─────┐
+    │  ●  │  (Normally open)
+    └──┬──┘
+       │ Terminal 1
+       │
+       ▼
+  ┌─────────────┐
+  │  Arduino    │
+  │  Mega2560   │
+  │             │
+  │  ┌──────┐   │
+  │  │ D20  │───┼──► Signal Input
+  │  └──────┘   │    (Internal pullup)
+  │             │    HIGH = inactive
+  │             │    LOW = active
+  │  ┌──────┐   │
+  │  │ GND  │───┼──► Ground
+  │  └──────┘   │
+  │             │
+  └─────────────┘
+       ▲
+       │
+       │ Terminal 2
+       │
+       └────────────► Connect to GND
 ```
 
 ### Digital Output (Relay)
 
 ```
-Arduino D35-D49 ----[Series Resistor]----> Transistor Base
-                                              |
-                                              +--[Collector]---> Relay Coil ---> 12V
-                                              |
-                                              +--[Emitter]-----> GND
-                                              |
-                                              [Flyback Diode across relay coil]
+ARDUINO MEGA2560
+┌──────────────┐
+│  ┌──────┐    │
+│  │ D35  │────┼──► [10kΩ] ──► Transistor Base
+│  └──────┘    │
+│              │
+│  ┌──────┐    │
+│  │ GND  │────┼──► Common Ground
+│  └──────┘    │
+└──────────────┘
+        │
+        ▼
+   ┌─────────────────┐
+   │   NPN Transistor │
+   │                  │
+   │  Base ◄──────────┼── From Arduino D35
+   │  Collector       │
+   │  Emitter         │
+   └──┬───────────┬───┘
+      │           │
+      │           └───► To GND
+      │
+      ▼
+   ┌─────────────┐
+   │   Relay     │
+   │   Coil      │
+   └──┬───────┬──┘
+      │       │
+      │       └──────┐
+      │              │
+      │              ▼
+      │         ┌─────────┐
+      │         │  12V    │
+      │         │  Supply │
+      │         └─────────┘
+      │
+      ▼
+   ┌─────┐      ┌─────────┐
+   │Flyback│     │   Load   │
+   │Diode │     │          │
+   └─────┘      └─────────┘
 ```
 
 ### PWM Output (Motor)
 
 ```
-Arduino PWM Pin ----> Motor Driver (PWM Input)
-                         |
-                         +---> Motor Terminal 1
-                         +---> Motor Terminal 2
-                         +---> Power Supply (VCC, GND)
+ARDUINO MEGA2560
+┌──────────────┐
+│  ┌──────┐    │
+│  │ D2   │────┼──► PWM Signal
+│  └──────┘    │
+│              │
+│  ┌──────┐    │
+│  │ GND  │────┼──► Ground
+│  └──────┘    │
+└──────────────┘
+        │
+        ▼
+   ┌──────────────────┐
+   │  Motor Driver    │
+   │  (L298N, etc.)   │
+   │                  │
+   │  PWM Input ◄─────┼── From Arduino D2
+   │  Motor +         │
+   │  Motor -         │
+   │  Power +         │
+   │  Power -         │
+   └──┬────────────┬──┘
+      │            │
+      ▼            ▼
+   ┌─────┐      ┌─────┐
+   │ 12V  │      │ GND │
+   │Supply│      └─────┘
+   └─────┘
+      │
+      ▼
+   ┌─────────┐
+   │  Motor  │
+   └─────────┘
 ```
 
 ### CAN Bus Connection
 
 ```
-Arduino Mega + MCP_CAN Shield
-    |
-    +--[CAN_H]---> CAN Bus High (twisted pair)
-    |
-    +--[CAN_L]---> CAN Bus Low (twisted pair)
-    |
-    +--[GND]-----> CAN Bus Ground
-
-CAN Bus Termination:
-    [120Ω Resistor] at Arduino end
-    [120Ω Resistor] at ECU end
+                                CAN BUS
+                                   │
+        ┌──────────────────────────┼──────────────────────────┐
+        │                          │                          │
+        ▼                          ▼                          ▼
+┌──────────────┐          ┌──────────────┐          ┌──────────────┐
+│ epicEFI ECU  │          │  Arduino     │          │ Other CAN     │
+│              │          │  Mega2560    │          │ Devices       │
+│  CAN_H ──────┼──────────┼──► CAN_H     │          │ CAN_H ────────┤
+│  CAN_L ──────┼──────────┼──► CAN_L     │          │ CAN_L ────────┤
+│  GND   ──────┼──────────┼──► GND       │          │ GND   ────────┤
+│              │          │              │          │               │
+│ [120Ω]       │          │              │          │ [120Ω]        │
+│ Terminator   │          │              │          │ Terminator    │
+└──────────────┘          └──────────────┘          └──────────────┘
+    (Node 1)                  (Node 2)                  (Node 3)
 ```
 
 ## Power Supply
