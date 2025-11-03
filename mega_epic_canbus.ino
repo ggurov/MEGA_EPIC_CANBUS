@@ -46,6 +46,11 @@ MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 #define ANALOG_CHANGE_THRESHOLD 5.0  // ADC counts - only transmit if change >= this value
 #define ANALOG_HEARTBEAT_INTERVAL_MS 1000  // Send all analog values every 1 second even if unchanged
 #define DIGITAL_CHANGE_ONLY true  // Only transmit digital inputs when state changes (no heartbeat needed for buttons)
+
+// Error handling and robustness configuration
+#define ECU_COMM_TIMEOUT_MS 3000  // ECU communication timeout (3 seconds)
+#define CAN_TX_RETRY_COUNT 2  // Number of retries for CAN TX failures
+#define CAN_TX_RETRY_DELAY_MS 10  // Delay between retries (ms)
 #define CAN_ID_VAR_REQUEST        (0x700 + ECU_CAN_ID)
 #define CAN_ID_VAR_RESPONSE       (0x720 + ECU_CAN_ID)
 #define CAN_ID_FUNCTION_REQUEST   (0x740 + ECU_CAN_ID)
@@ -89,6 +94,14 @@ const int32_t VAR_HASH_D35_D49 = 0;  // PLACEHOLDER - needs to be set from varia
 static float previousAnalogValues[16] = {0};  // Track previous ADC values for A0-A15
 static uint16_t previousDigitalBits = 0;      // Track previous digital input bitfield
 static unsigned long lastAnalogHeartbeatMs = 0;  // Last heartbeat transmission time
+
+// Error handling and diagnostics
+static unsigned long lastEcuResponseMs = 0;  // Timestamp of last successful ECU response
+static bool ecuCommunicationLost = false;   // ECU communication state
+static uint32_t canTxSuccessCount = 0;      // CAN TX success counter
+static uint32_t canTxFailureCount = 0;      // CAN TX failure counter
+static uint32_t canRxCount = 0;             // CAN RX frame counter
+static uint32_t canRxErrorCount = 0;        // CAN RX error counter (invalid frames)
 
 // PWM output pins (14 total: D2-D8, D10-D13, D44-D46, skipping D9 for MCP_CAN CS)
 const uint8_t PWM_PINS[14] = {
@@ -139,12 +152,38 @@ static inline float readFloat32BigEndian(const unsigned char* in)
     return conv.f;
 }
 
-static inline void sendVariableSetFrame(int32_t varHash, float value)
+// Enhanced CAN TX with error handling and retry logic
+static bool sendVariableSetFrameWithRetry(int32_t varHash, float value, uint8_t retries = CAN_TX_RETRY_COUNT)
 {
     unsigned char data[8];
     writeInt32BigEndian(varHash, &data[0]);
     writeFloat32BigEndian(value, &data[4]);
-    CAN.sendMsgBuf(CAN_ID_VARIABLE_SET, 0, 8, data);
+    
+    for (uint8_t attempt = 0; attempt <= retries; ++attempt)
+    {
+        byte ret = CAN.sendMsgBuf(CAN_ID_VARIABLE_SET, 0, 8, data);
+        if (ret == CAN_SENDMSGTIMEOUT || ret == CAN_OK)
+        {
+            canTxSuccessCount++;
+            return true;
+        }
+        
+        // Retry with delay (except on last attempt)
+        if (attempt < retries)
+        {
+            delay(CAN_TX_RETRY_DELAY_MS);
+        }
+    }
+    
+    // All retries failed
+    canTxFailureCount++;
+    return false;
+}
+
+// Legacy wrapper for backward compatibility
+static inline void sendVariableSetFrame(int32_t varHash, float value)
+{
+    sendVariableSetFrameWithRetry(varHash, value, 0);  // No retries for inline function (use WithRetry for critical frames)
 }
 
 static inline bool sendVariableRequest(int32_t varHash)
@@ -152,7 +191,9 @@ static inline bool sendVariableRequest(int32_t varHash)
     unsigned char data[4];
     writeInt32BigEndian(varHash, &data[0]);
     byte ret = CAN.sendMsgBuf(CAN_ID_VAR_REQUEST, 0, 4, data);
-    return (ret == CAN_SENDMSGTIMEOUT || ret == CAN_OK);
+    bool success = (ret == CAN_SENDMSGTIMEOUT || ret == CAN_OK);
+    if (success) canTxSuccessCount++; else canTxFailureCount++;
+    return success;
 }
 
 // Function call request functions (EPIC protocol)
@@ -346,14 +387,48 @@ void setup()
 }
 
 
+// Safe mode: Set all outputs to safe states
+static void enterSafeMode(void)
+{
+    // Set all digital outputs to LOW (safe state)
+    for (uint8_t pin = 35; pin <= 49; ++pin)
+    {
+        digitalWrite(pin, LOW);
+    }
+    
+    // Set all PWM outputs to 0% duty cycle (safe state)
+    for (uint8_t i = 0; i < 14; ++i)
+    {
+        analogWrite(PWM_PINS[i], 0);
+    }
+}
+
 // Process incoming CAN frames (EPIC protocol)
 static void processCanFrame(unsigned long canId, unsigned char len, unsigned char* buf)
 {
+    canRxCount++;  // Increment RX counter
+    
+    // Enhanced frame validation
     // Validate frame length (EPIC frames should be 8 bytes, except var_request which is 4)
-    if (len != 8 && len != 4)
+    if (len == 0 || len > 8)
     {
         Serial.print("Invalid frame length: ");
         Serial.println(len);
+        canRxErrorCount++;
+        return;
+    }
+    
+    // Validate CAN ID range (should be in EPIC protocol range for this ECU)
+    // EPIC IDs: 0x700-0x70F, 0x720-0x72F, 0x740-0x74F, 0x760-0x76F, 0x780-0x78F
+    unsigned long baseId = canId & 0xFF0;  // Mask to base ID
+    unsigned long ecuId = canId & 0x00F;   // Extract ECU ID
+    if (ecuId != ECU_CAN_ID || 
+        (baseId != 0x700 && baseId != 0x720 && baseId != 0x740 && 
+         baseId != 0x760 && baseId != 0x780))
+    {
+        Serial.print("Invalid CAN ID: 0x");
+        Serial.println(canId, HEX);
+        canRxErrorCount++;
         return;
     }
     
@@ -363,7 +438,16 @@ static void processCanFrame(unsigned long canId, unsigned char len, unsigned cha
         if (len != 8)
         {
             Serial.println("Error: Variable response must be 8 bytes");
+            canRxErrorCount++;
             return;
+        }
+        
+        // Update ECU communication watchdog - successful response received
+        lastEcuResponseMs = millis();
+        if (ecuCommunicationLost)
+        {
+            ecuCommunicationLost = false;
+            Serial.println("ECU communication restored");
         }
         
         // Extract variable hash (bytes 0-3)
@@ -375,14 +459,18 @@ static void processCanFrame(unsigned long canId, unsigned char len, unsigned cha
         // Handle digital output bitfield (D35-D49)
         if (VAR_HASH_D35_D49 != 0 && varHash == VAR_HASH_D35_D49)
         {
-            // Unpack 15-bit bitfield and apply to D35-D49
-            uint16_t bits = (uint16_t)value;  // Cast float to uint16_t (bitfield)
-            
-            for (uint8_t pin = 35; pin <= 49; ++pin)
+            // Only update outputs if communication is healthy
+            if (!ecuCommunicationLost)
             {
-                uint8_t bitIndex = (uint8_t)(pin - 35);
-                bool state = (bits >> bitIndex) & 1;
-                digitalWrite(pin, state ? HIGH : LOW);
+                // Unpack 15-bit bitfield and apply to D35-D49
+                uint16_t bits = (uint16_t)value;  // Cast float to uint16_t (bitfield)
+                
+                for (uint8_t pin = 35; pin <= 49; ++pin)
+                {
+                    uint8_t bitIndex = (uint8_t)(pin - 35);
+                    bool state = (bits >> bitIndex) & 1;
+                    digitalWrite(pin, state ? HIGH : LOW);
+                }
             }
             
             // Optional debug output (comment out for production)
@@ -402,11 +490,15 @@ static void processCanFrame(unsigned long canId, unsigned char len, unsigned cha
                     if (value < 0.0) value = 0.0;
                     if (value > 100.0) value = 100.0;
                     
-                    // Convert percentage (0-100%) to PWM range (0-255)
-                    uint8_t pwmValue = (uint8_t)((value / 100.0) * 255.0);
-                    
-                    // Apply PWM output
-                    analogWrite(PWM_PINS[i], pwmValue);
+                    // Only update PWM if communication is healthy
+                    if (!ecuCommunicationLost)
+                    {
+                        // Convert percentage (0-100%) to PWM range (0-255)
+                        uint8_t pwmValue = (uint8_t)((value / 100.0) * 255.0);
+                        
+                        // Apply PWM output
+                        analogWrite(PWM_PINS[i], pwmValue);
+                    }
                     
                     // Optional debug output (comment out for production)
                     // Serial.print("PWM D");
@@ -434,7 +526,16 @@ static void processCanFrame(unsigned long canId, unsigned char len, unsigned cha
         if (len != 8)
         {
             Serial.println("Error: Function response must be 8 bytes");
+            canRxErrorCount++;
             return;
+        }
+        
+        // Update ECU communication watchdog - successful response received
+        lastEcuResponseMs = millis();
+        if (ecuCommunicationLost)
+        {
+            ecuCommunicationLost = false;
+            Serial.println("ECU communication restored");
         }
         
         // Extract function ID (bytes 0-1, big-endian uint16) - echo of called function
@@ -465,7 +566,16 @@ static void processCanFrame(unsigned long canId, unsigned char len, unsigned cha
         if (len != 8)
         {
             Serial.println("Error: Variable set must be 8 bytes");
+            canRxErrorCount++;
             return;
+        }
+        
+        // Update ECU communication watchdog - successful communication
+        lastEcuResponseMs = millis();
+        if (ecuCommunicationLost)
+        {
+            ecuCommunicationLost = false;
+            Serial.println("ECU communication restored");
         }
         
         // Handle variable_set from ECU (if needed in future)
@@ -479,6 +589,7 @@ static void processCanFrame(unsigned long canId, unsigned char len, unsigned cha
         Serial.print(canId, HEX);
         Serial.print(", Length: ");
         Serial.println(len);
+        canRxErrorCount++;
     }
 }
 
@@ -615,6 +726,42 @@ void loop()
             // Move to next channel (round-robin)
             currentPwmChannel = (currentPwmChannel + 1) % 14;
             attempts++;
+        }
+    }
+    
+    // ECU Communication Watchdog - Check for communication loss
+    unsigned long nowMsComm = millis();
+    if (lastEcuResponseMs > 0)  // Only check after first response received
+    {
+        unsigned long timeSinceLastResponse = nowMsComm - lastEcuResponseMs;
+        
+        if (timeSinceLastResponse > ECU_COMM_TIMEOUT_MS && !ecuCommunicationLost)
+        {
+            // ECU communication lost - enter safe mode
+            ecuCommunicationLost = true;
+            Serial.println("WARNING: ECU communication lost - entering safe mode");
+            enterSafeMode();
+            
+            // Print diagnostics
+            Serial.println("CAN Diagnostics:");
+            Serial.print("  TX Success: ");
+            Serial.println(canTxSuccessCount);
+            Serial.print("  TX Failures: ");
+            Serial.println(canTxFailureCount);
+            Serial.print("  RX Frames: ");
+            Serial.println(canRxCount);
+            Serial.print("  RX Errors: ");
+            Serial.println(canRxErrorCount);
+        }
+    }
+    else if (nowMsComm > 5000)
+    {
+        // No response received within 5 seconds of boot - initial warning
+        static bool initialWarningPrinted = false;
+        if (!initialWarningPrinted)
+        {
+            Serial.println("WARNING: No ECU response received yet (check CAN bus connection)");
+            initialWarningPrinted = true;
         }
     }
 }
