@@ -40,6 +40,7 @@ MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 #define ECU_CAN_ID  1
 #define TRANSMIT_INTERVAL_MS 25
 #define DIGITAL_OUTPUT_POLL_INTERVAL_MS 50  // 20 Hz polling for digital outputs
+#define PWM_POLL_INTERVAL_MS 100  // 10 Hz polling for PWM outputs (14 channels, staggered)
 #define CAN_ID_VAR_REQUEST        (0x700 + ECU_CAN_ID)
 #define CAN_ID_VAR_RESPONSE       (0x720 + ECU_CAN_ID)
 #define CAN_ID_FUNCTION_REQUEST   (0x740 + ECU_CAN_ID)
@@ -78,6 +79,22 @@ const int32_t VAR_HASH_D20_D34 = 2136453598;
 // EPIC variable hash for packed digital outputs D35-D49 bitfield
 // TODO: Get actual hash from variables.json - placeholder for now
 const int32_t VAR_HASH_D35_D49 = 0;  // PLACEHOLDER - needs to be set from variables.json
+
+// PWM output pins (14 total: D2-D8, D10-D13, D44-D46, skipping D9 for MCP_CAN CS)
+const uint8_t PWM_PINS[14] = {
+    2, 3, 4, 5, 6, 7, 8,      // D2-D8
+    10, 11, 12, 13,           // D10-D13
+    44, 45, 46                // D44-D46
+};
+
+// EPIC variable hashes for PWM duty cycle values (0-100% float32)
+// Order matches PWM_PINS array: D2, D3, D4, D5, D6, D7, D8, D10, D11, D12, D13, D44, D45, D46
+// TODO: Get actual hashes from variables.json - all zeros are placeholders
+const int32_t VAR_HASH_PWM[14] = {
+    0, 0, 0, 0, 0, 0, 0,      // D2-D8 placeholders
+    0, 0, 0, 0,               // D10-D13 placeholders
+    0, 0, 0                   // D44-D46 placeholders
+};
 
 // ---------------- Internal helpers ----------------
 static inline void writeInt32BigEndian(int32_t value, unsigned char* out)
@@ -163,12 +180,35 @@ void setup()
         digitalWrite(pin, LOW);  // Initialize to safe state (LOW)
     }
     
+    // Configure PWM outputs D2-D8, D10-D13, D44-D46
+    // Pins are initialized as OUTPUT, PWM is enabled via analogWrite() later
+    for (uint8_t i = 0; i < 14; ++i)
+    {
+        pinMode(PWM_PINS[i], OUTPUT);
+        analogWrite(PWM_PINS[i], 0);  // Initialize to 0% duty cycle (safe state)
+    }
+    
     Serial.println("Pin initialization complete");
     
     // Check if digital output hash is configured
     if (VAR_HASH_D35_D49 == 0)
     {
         Serial.println("WARNING: VAR_HASH_D35_D49 not set - digital outputs disabled");
+    }
+    
+    // Check if PWM hashes are configured
+    bool pwmConfigured = false;
+    for (uint8_t i = 0; i < 14; ++i)
+    {
+        if (VAR_HASH_PWM[i] != 0)
+        {
+            pwmConfigured = true;
+            break;
+        }
+    }
+    if (!pwmConfigured)
+    {
+        Serial.println("WARNING: VAR_HASH_PWM[] not set - PWM outputs disabled");
     }
 }
 
@@ -216,10 +256,40 @@ static void processCanFrame(unsigned long canId, unsigned char len, unsigned cha
             // Serial.print("Digital outputs updated: 0x");
             // Serial.println(bits, HEX);
         }
+        // Handle PWM duty cycle values (0-100% float32)
         else
         {
-            // Other variable responses can be handled here (e.g., PWM values)
-            // Serial.print("Var response - Hash: ");
+            // Check if this is a PWM variable response
+            for (uint8_t i = 0; i < 14; ++i)
+            {
+                if (VAR_HASH_PWM[i] != 0 && varHash == VAR_HASH_PWM[i])
+                {
+                    // Value is duty cycle percentage (0.0-100.0)
+                    // Clamp to valid range
+                    if (value < 0.0) value = 0.0;
+                    if (value > 100.0) value = 100.0;
+                    
+                    // Convert percentage (0-100%) to PWM range (0-255)
+                    uint8_t pwmValue = (uint8_t)((value / 100.0) * 255.0);
+                    
+                    // Apply PWM output
+                    analogWrite(PWM_PINS[i], pwmValue);
+                    
+                    // Optional debug output (comment out for production)
+                    // Serial.print("PWM D");
+                    // Serial.print(PWM_PINS[i]);
+                    // Serial.print(": ");
+                    // Serial.print(value);
+                    // Serial.print("% -> ");
+                    // Serial.println(pwmValue);
+                    
+                    return;  // Found and handled, exit
+                }
+            }
+            
+            // Unknown variable response (not digital outputs or PWM)
+            // Optional debug output (comment out for production)
+            // Serial.print("Unknown var response - Hash: ");
             // Serial.print(varHash);
             // Serial.print(", Value: ");
             // Serial.println(value);
@@ -287,6 +357,8 @@ void loop()
     // Periodic transmission of analog and digital inputs
     static unsigned long lastTxMs = 0;
     static unsigned long lastDigitalOutputRequestMs = 0;
+    static unsigned long lastPwmRequestMs = 0;
+    static uint8_t currentPwmChannel = 0;  // Current PWM channel to request (0-13)
     unsigned long nowMs = millis();
     
     if (nowMs - lastTxMs >= TRANSMIT_INTERVAL_MS)
@@ -333,6 +405,40 @@ void loop()
             {
                 Serial.println("Error: Failed to send variable_request for digital outputs");
             }
+        }
+    }
+    
+    // Periodic variable_request for PWM outputs (14 channels, staggered)
+    // Request one channel per polling interval to spread CAN traffic
+    if (nowMs - lastPwmRequestMs >= PWM_POLL_INTERVAL_MS)
+    {
+        lastPwmRequestMs = nowMs;
+        
+        // Find next configured PWM channel to request
+        bool pwmRequestSent = false;
+        uint8_t attempts = 0;
+        
+        while (!pwmRequestSent && attempts < 14)
+        {
+            // Check if current channel has a valid hash
+            if (VAR_HASH_PWM[currentPwmChannel] != 0)
+            {
+                // Request PWM duty cycle for this channel
+                bool success = sendVariableRequest(VAR_HASH_PWM[currentPwmChannel]);
+                if (!success)
+                {
+                    Serial.print("Error: Failed to send variable_request for PWM channel ");
+                    Serial.print(currentPwmChannel);
+                    Serial.print(" (D");
+                    Serial.print(PWM_PINS[currentPwmChannel]);
+                    Serial.println(")");
+                }
+                pwmRequestSent = true;
+            }
+            
+            // Move to next channel (round-robin)
+            currentPwmChannel = (currentPwmChannel + 1) % 14;
+            attempts++;
         }
     }
 }
