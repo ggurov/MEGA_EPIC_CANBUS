@@ -145,6 +145,102 @@ static inline bool sendVariableRequest(int32_t varHash)
     return (ret == CAN_SENDMSGTIMEOUT || ret == CAN_OK);
 }
 
+// Function call request functions (EPIC protocol)
+// Function request frame format: [Function ID (uint16)] [Arg1 (float32)] [Arg2 (int16) optional]
+
+// Send function call with no arguments (DLC = 6 bytes: 2 bytes ID + 4 bytes Arg1 = 0.0)
+static inline bool sendFunctionRequest0(uint16_t funcId)
+{
+    unsigned char data[6];
+    // Function ID (bytes 0-1, big-endian)
+    data[0] = (unsigned char)((funcId >> 8) & 0xFF);
+    data[1] = (unsigned char)(funcId & 0xFF);
+    // Argument 1 = 0.0 (bytes 2-5)
+    writeFloat32BigEndian(0.0, &data[2]);
+    byte ret = CAN.sendMsgBuf(CAN_ID_FUNCTION_REQUEST, 0, 6, data);
+    return (ret == CAN_SENDMSGTIMEOUT || ret == CAN_OK);
+}
+
+// Send function call with 1 argument (DLC = 6 bytes: 2 bytes ID + 4 bytes Arg1)
+static inline bool sendFunctionRequest1(uint16_t funcId, float arg1)
+{
+    unsigned char data[6];
+    // Function ID (bytes 0-1, big-endian)
+    data[0] = (unsigned char)((funcId >> 8) & 0xFF);
+    data[1] = (unsigned char)(funcId & 0xFF);
+    // Argument 1 (bytes 2-5, float32 big-endian)
+    writeFloat32BigEndian(arg1, &data[2]);
+    byte ret = CAN.sendMsgBuf(CAN_ID_FUNCTION_REQUEST, 0, 6, data);
+    return (ret == CAN_SENDMSGTIMEOUT || ret == CAN_OK);
+}
+
+// Send function call with 2 arguments (DLC = 8 bytes: 2 bytes ID + 4 bytes Arg1 + 2 bytes Arg2)
+static inline bool sendFunctionRequest2(uint16_t funcId, float arg1, int16_t arg2)
+{
+    unsigned char data[8];
+    // Function ID (bytes 0-1, big-endian)
+    data[0] = (unsigned char)((funcId >> 8) & 0xFF);
+    data[1] = (unsigned char)(funcId & 0xFF);
+    // Argument 1 (bytes 2-5, float32 big-endian)
+    writeFloat32BigEndian(arg1, &data[2]);
+    // Argument 2 (bytes 6-7, int16 big-endian)
+    data[6] = (unsigned char)((arg2 >> 8) & 0xFF);
+    data[7] = (unsigned char)(arg2 & 0xFF);
+    byte ret = CAN.sendMsgBuf(CAN_ID_FUNCTION_REQUEST, 0, 8, data);
+    return (ret == CAN_SENDMSGTIMEOUT || ret == CAN_OK);
+}
+
+// Helper functions for common ECU function calls
+// These are convenience wrappers around the base function call functions
+// Common function IDs from EPIC protocol specification:
+
+#define FUNC_ID_setFuelAdd           1   // Arg1: fuel adjustment (%)
+#define FUNC_ID_setFuelMult           2   // Arg1: fuel multiplier
+#define FUNC_ID_setTimingAdd          3   // Arg1: timing adjustment (deg)
+#define FUNC_ID_setTimingMult         4   // Arg1: timing multiplier
+#define FUNC_ID_setBoostTargetAdd     5   // Arg1: boost target adder (kPa)
+#define FUNC_ID_setBoostTargetMult    6   // Arg1: boost target multiplier
+#define FUNC_ID_setBoostDutyAdd       7   // Arg1: boost duty cycle adder (%)
+#define FUNC_ID_setIdleAdd            8   // Arg1: idle position adder (%)
+#define FUNC_ID_setIdleRpm            9   // Arg1: idle RPM target
+#define FUNC_ID_getEtbTarget         10   // No args, returns ETB target (%)
+#define FUNC_ID_setEtbAdd            11   // Arg1: ETB position adder (%)
+#define FUNC_ID_setEwgAdd            12   // Arg1: electronic wastegate adder (%)
+#define FUNC_ID_setEtbDisabled        13   // Arg1: disable ETB (0=enable, 1=disable)
+#define FUNC_ID_setIgnDisabled       14   // Arg1: disable ignition (0=enable, 1=disable)
+#define FUNC_ID_setFuelDisabled      15   // Arg1: disable fuel (0=enable, 1=disable)
+#define FUNC_ID_getGpPwm            22   // Arg1: index, returns GPPWM output (%)
+#define FUNC_ID_selfStimulateRPM      28   // Arg1: trigger simulator RPM
+#define FUNC_ID_getIdlePosition      32   // No args, returns idle position (%)
+#define FUNC_ID_getTorque            33   // No args, returns torque estimate (Nm)
+#define FUNC_ID_getEngineState       36   // No args, returns engine state (0=stopped, 1=cranking, 2=running)
+#define FUNC_ID_setLuaGauge          38   // Arg1: value, Arg2: index
+
+// Convenience wrappers (examples - add more as needed)
+static inline bool callSetFuelAdd(float fuelAdjustmentPercent)
+{
+    return sendFunctionRequest1(FUNC_ID_setFuelAdd, fuelAdjustmentPercent);
+}
+
+static inline bool callSetIdleRpm(float idleRpm)
+{
+    return sendFunctionRequest1(FUNC_ID_setIdleRpm, idleRpm);
+}
+
+static inline bool callGetEtbTarget(void)
+{
+    return sendFunctionRequest0(FUNC_ID_getEtbTarget);
+}
+
+static inline bool callGetEngineState(void)
+{
+    return sendFunctionRequest0(FUNC_ID_getEngineState);
+}
+
+static inline bool callSetLuaGauge(float value, int16_t index)
+{
+    return sendFunctionRequest2(FUNC_ID_setLuaGauge, value, index);
+}
 
 
 void setup()
@@ -304,17 +400,27 @@ static void processCanFrame(unsigned long canId, unsigned char len, unsigned cha
             return;
         }
         
-        // Extract function ID (bytes 0-1)
+        // Extract function ID (bytes 0-1, big-endian uint16) - echo of called function
         uint16_t funcId = ((uint16_t)buf[0] << 8) | buf[1];
         
-        // Extract return value (bytes 2-5 as float32)
-        float returnValue = readFloat32BigEndian(&buf[2]);
+        // Bytes 2-3: Reserved (should be 0x00 0x00, but we skip them)
         
-        // Function response handling can be implemented here
+        // Extract return value (bytes 4-7, float32 big-endian)
+        // Note: 0.0 indicates error or function doesn't return value
+        float returnValue = readFloat32BigEndian(&buf[4]);
+        
+        // Function response handling
+        // Applications can match funcId with pending requests and use returnValue
+        // Optional debug output (comment out for production)
         // Serial.print("Function response - ID: ");
         // Serial.print(funcId);
         // Serial.print(", Return: ");
         // Serial.println(returnValue);
+        
+        // Example: Handle specific function responses here
+        // if (funcId == 10) {  // getEtbTarget
+        //     // Use returnValue
+        // }
     }
     // Parse variable_set frames (if ECU sends variable_set to Mega - optional)
     else if (IS_VAR_SET(canId))
