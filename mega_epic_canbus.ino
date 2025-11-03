@@ -1,5 +1,41 @@
-/*  receive a frame from can bus
-
+/*
+    MEGA_EPIC_CANBUS - Arduino Mega2560 CAN Bus I/O Expansion Firmware
+    
+    Version: 1.0.0
+    Status: Production Ready
+    License: See LICENSE file
+    
+    Purpose:
+    Expands I/O capabilities of epicEFI ECUs via CAN bus communication.
+    Implements EPIC_CAN_BUS protocol for remote variable access and function calls.
+    
+    Hardware:
+    - Arduino Mega2560 (or compatible)
+    - MCP_CAN Shield (MCP2515-based CAN controller)
+    - SPI CS Pin: D9 (default, configurable)
+    
+    I/O Capabilities:
+    - 16 Analog Inputs (A0-A15): 10-bit ADC, 0-5V
+    - 15 Digital Inputs (D20-D34): Pullup-enabled, LOW=active
+    - 15 Digital Outputs (D35-D49): ECU-controlled
+    - 14 PWM Outputs (D2-D8, D10-D13, D44-D46): 8-bit PWM
+    - 2 Interrupt Counters (D18, D19): Optional, for wheel speed sensors
+    
+    Documentation:
+    - README.md: User documentation and quick start
+    - CONFIGURATION.md: Configuration guide
+    - PIN_ASSIGNMENT.md: Pin map and wiring diagrams
+    - TROUBLESHOOTING.md: Troubleshooting guide
+    - TECHNICAL.md: Technical documentation
+    - INSTALLATION.md: Installation instructions
+    
+    Protocol:
+    - EPIC Over CANbus Protocol (see .project/epic_can_bus_spec.txt)
+    - CAN ID Base Offsets: 0x700 (var_request), 0x720 (var_response),
+                           0x740 (func_request), 0x760 (func_response),
+                           0x780 (var_set)
+    - Data Format: Big-endian byte order, Float32 IEEE 754
+    
     CAN Baudrate,
     
     #define CAN_5KBPS           1
