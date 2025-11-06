@@ -57,7 +57,7 @@ Step-by-step guide for installing and setting up MEGA_EPIC_CANBUS firmware.
 
 1. Open Arduino IDE
 2. Go to **Tools → Manage Libraries...**
-3. Search for "mcp_can"
+3. Search for "mcp_canbus"
 4. Find "mcp_can" by Longan Labs
 5. Click **Install** button
 6. Wait for installation to complete
