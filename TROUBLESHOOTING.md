@@ -15,6 +15,57 @@ Always check Serial Monitor (115200 baud) for diagnostic messages:
 
 ## Common Issues
 
+### Compilation Errors
+
+**Symptoms:**
+- Compilation fails with SPI library errors
+- Error messages like: `error: request for member 'spcr' in 'settings'`
+- Error messages like: `error: request for member 'spsr' in 'settings'`
+- Error path shows: `arduino\hardware\avr\1.8.6\libraries\SPI\src/SPI.h`
+
+**Possible Causes & Solutions:**
+
+1. **Outdated Arduino AVR Board Package**
+   - ✅ The error shows Arduino AVR hardware package version 1.8.6 (very old)
+   - ✅ Update to latest Arduino AVR board package (1.8.13+ recommended)
+   - ✅ **Solution:** Tools → Board → Boards Manager → Search "Arduino AVR Boards" → Update to latest version
+
+2. **Library Compatibility**
+   - ✅ MCP_CAN library may be incompatible with old SPI library
+   - ✅ Try updating MCP_CAN library to latest version
+   - ✅ Library Manager → Search "mcp_can" → Update if available
+
+3. **Arduino IDE Version**
+   - ✅ Older Arduino IDE versions may have compatibility issues
+   - ✅ Update to Arduino IDE 1.8.19+ or Arduino IDE 2.x
+   - ✅ Download from: https://www.arduino.cc/en/software
+
+**Debug Steps:**
+1. Check Arduino IDE version (Help → About Arduino)
+2. Check Board Package version:
+   - Tools → Board → Boards Manager
+   - Search "Arduino AVR Boards"
+   - Note current version (should be 1.8.13 or newer)
+3. Update if needed:
+   - Click "Update" or "Install" button next to Arduino AVR Boards
+   - Wait for update to complete
+   - Restart Arduino IDE
+4. Try compiling again
+
+**Quick Fix Steps:**
+1. Open Arduino IDE
+2. Go to **Tools → Board → Boards Manager...**
+3. Search for **"Arduino AVR Boards"**
+4. If version is 1.8.6 or older, click **"Update"** or **"Install"** button
+5. Wait for update to complete (may take a few minutes)
+6. Restart Arduino IDE
+7. Try compiling again
+
+**Alternative:** If update doesn't work, try:
+- Uninstall Arduino AVR Boards package
+- Reinstall latest version
+- Or switch to Arduino IDE 2.x (more modern)
+
 ### CAN Bus Not Initializing
 
 **Symptoms:**
