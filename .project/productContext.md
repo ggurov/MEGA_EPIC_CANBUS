@@ -40,9 +40,9 @@ Use Arduino Mega2560 + MCP_CAN shield as I/O expansion module communicating with
 **Robust I/O:**
 - 16 analog inputs (A0-A15, 0-5V native)
 - 14 hardware PWM outputs
-- 15 digital button inputs
+- 16 digital button inputs (D22-D37)
 - 15 digital low-speed outputs
-- 6 interrupt-capable pins for counters
+- 4 VSS interrupt inputs (D18-D21) for wheel speed sensors
 
 **Industry Standard Communication:**
 - CAN bus: proven automotive protocol
@@ -59,10 +59,10 @@ Use Arduino Mega2560 + MCP_CAN shield as I/O expansion module communicating with
 ### How It Solves the Problem
 
 1. **Analog Sensors:** Mega reads A0-A15, transmits raw ADC values to ECU via CAN variable_set frames
-2. **Digital Buttons:** Mega reads D20-D34, packs states into bitfield variable, ECU polls/receives
+2. **Digital Buttons:** Mega reads D22-D37, packs states into 16-bit bitfield variable, ECU polls/receives
 3. **PWM Outputs:** ECU stores PWM parameters in variables, Mega requests and applies to D2-D13, D44-D46
 4. **Digital Outputs:** ECU stores desired output states, Mega polls and applies via `digitalWrite()` on D35-D49
-5. **Counters (Future):** Mega handles interrupt-driven counters on D18-D21, reports deltas/timestamps to ECU
+5. **VSS Counters:** Mega handles interrupt-driven edge counting on D18-D21, converts to pulses per second, reports to ECU
 
 ## Target Users
 

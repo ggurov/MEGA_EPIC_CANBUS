@@ -1,21 +1,24 @@
 # Active Context: MEGA_EPIC_CANBUS
 
 ## Current Status
-**Phase:** Initial Development - CAN Communication Scaffold  
-**Last Updated:** October 30, 2025
+**Phase:** Phase 1 Complete - Analog, Digital, and VSS I/O Transmission  
+**Last Updated:** Current
 
 ## Current Implementation
-Baseline Arduino sketch exists (`mega_epic_canbus.ino`) with:
-- MCP_CAN library integration
-- CAN initialization at 500 kbps
-- Basic receive loop that prints incoming CAN frames to Serial
-- SPI CS pin 9 configured for MCP_CAN shield
+Firmware (`mega_epic_canbus.ino`) implements:
+- MCP_CAN library integration at 500 kbps
+- CAN transmission capability (variable_set frames)
+- Analog inputs (A0-A15): Periodic sampling, float32 conversion, CAN transmission
+- Digital inputs (D22-D37): 16-bit bitfield packing, inverted logic, CAN transmission
+- VSS inputs (D18-D21): Interrupt-driven edge counting, rate calculation, CAN transmission
+- Big-endian byte conversion utilities
+- Overflow-safe counter and time handling
 
 **Code State:**
-- Functional CAN receive example
-- No EPIC protocol implementation yet
-- No I/O handling implemented
-- Serial debug output only
+- Functional CAN TX/RX
+- EPIC protocol variable_set frame transmission
+- I/O reading and transmission implemented
+- VSS interrupt handlers and rate calculation working
 
 ## Immediate Next Steps
 
@@ -45,11 +48,11 @@ Baseline Arduino sketch exists (`mega_epic_canbus.ino`) with:
 - Send as variable_set frames (0x780 + ecuCanId)
 - Handle transmission timing/throttling
 
-### 5. Implement Digital Input Module
-- Read D20-D34 using `digitalRead()`
-- Pack 15 bits into bitfield variable
-- Periodic update or change-detection strategy
-- Send packed state via variable_set frame
+### 5. Implement Digital Output Module
+- Initialize D35-D49 as OUTPUT
+- Request output states from ECU via variable_request
+- Unpack bitfield from variable_response
+- Apply states via digitalWrite()
 
 ## Current Questions/Blockers
 
@@ -73,12 +76,18 @@ Baseline Arduino sketch exists (`mega_epic_canbus.ino`) with:
 - **CAN Speed:** 500 kbps selected (per requirements)
 - **CS Pin:** D9 reserved for MCP_CAN (standard shield configuration)
 - **Serial Debug:** 115200 baud for development/debugging
+- **ECU CAN ID:** 1 (configured)
+- **Digital Inputs:** D22-D37 (16 pins, 16-bit bitfield)
+- **VSS Pins:** D18-D21 (INT3, INT2, INT1, INT0) for consistent interrupt behavior
+- **VSS Calculation:** 100ms interval for rate calculation
+- **Transmission Interval:** 25ms for all I/O updates
 
 ## Known Issues
-- Current code has no CAN transmit capability
-- No I/O initialization
-- No protocol state machine
+- No EPIC protocol frame parsing (RX only, no handling)
+- No digital output implementation (D35-D49)
+- No PWM output implementation
 - No error handling or recovery
+- No watchdog timer
 
 ## Testing Needs
 - CAN bus hardware validation

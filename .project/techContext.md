@@ -31,24 +31,26 @@
 - D44, D45, D46: PWM capable
 - D9: Reserved for MCP_CAN CS
 
-**Digital Button Inputs (15 pins):**
-- D20-D34: Digital inputs (internal pullup available)
+**Digital Button Inputs (16 pins):**
+- D22-D37: Digital inputs (internal pullup available, 16-bit bitfield)
 
 **Digital Low-Speed Outputs (15 pins):**
 - D35-D49: Digital outputs
 
+**VSS (Vehicle Speed Sensor) Inputs (4 pins):**
+- D18, D19, D20, D21: External interrupts (INT3, INT2, INT1, INT0)
+- Falling edge detection for VR conditioner signals
+- Internal pullups enabled by default to prevent interrupt storms when pins are floating
+- VR conditioner signals override pullup when connected
+- Interrupt-driven edge counting, rate calculation in main loop
+
 **Reserved:**
 - D9: MCP_CAN CS (SPI)
 - D50-D53: SPI bus (MCP_CAN)
-- D2: MCP_CAN INT (optional, for interrupt-driven RX)
-
-**Interrupt Capable:**
-- D2, D3: INT0, INT1
-- D18, D19: INT3, INT2 (also UART1 TX/RX)
-- D20, D21: INT1, INT0 (also I2C SDA/SCL)
 
 **Available for Future Use:**
-- D14-D19: UART2 and UART3 pins (if UARTs not needed)
+- D14-D17: UART2 and UART3 pins (if UARTs not needed)
+- D2, D3: PWM capable, available if not used for other purposes
 
 ## Software Stack
 

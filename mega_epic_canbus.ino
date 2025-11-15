@@ -48,8 +48,38 @@ const int32_t VAR_HASH_ANALOG[16] = {
    -1821826347   // A15
 };
 
-// EPIC variable hash for packed digital inputs D20-D34 bitfield
-const int32_t VAR_HASH_D20_D34 = 2136453598;
+// EPIC variable hash for packed digital inputs D22-D37 bitfield (16 bits)
+const int32_t VAR_HASH_D22_D37 = 2138825443;
+
+// VSS (Vehicle Speed Sensor) configuration
+#define VSS_FRONT_LEFT_PIN   20  // INT1
+#define VSS_FRONT_RIGHT_PIN  21  // INT0
+#define VSS_REAR_LEFT_PIN    18  // INT3
+#define VSS_REAR_RIGHT_PIN   19  // INT2
+#define VSS_CALC_INTERVAL_MS 200 // Rate calculation interval
+#define VSS_ENABLE_PULLUP    1   // Internal pullups enabled to prevent interrupt storms when pins are floating
+
+// VSS variable hashes (from vss_pickup.txt)
+const int32_t VAR_HASH_VSS_FRONT_LEFT  = -1645222329;
+const int32_t VAR_HASH_VSS_FRONT_RIGHT = 1549498074;
+const int32_t VAR_HASH_VSS_REAR_LEFT   = 768443592;
+const int32_t VAR_HASH_VSS_REAR_RIGHT  = -403905157;
+
+// VSS counter structure
+struct VSSChannel {
+    volatile uint32_t edgeCount;      // Edge counter (ISR increments)
+    uint32_t lastCount;               // Last count for rate calculation
+    unsigned long lastCalcTime;       // Last calculation timestamp (ms)
+    float pulsesPerSecond;             // Calculated rate
+};
+
+// VSS channels array (FrontLeft, FrontRight, RearLeft, RearRight)
+VSSChannel vssChannels[4] = {
+    {0, 0, 0, 0.0f},  // FrontLeft
+    {0, 0, 0, 0.0f},  // FrontRight
+    {0, 0, 0, 0.0f},  // RearLeft
+    {0, 0, 0, 0.0f}   // RearRight
+};
 
 // ---------------- Internal helpers ----------------
 static inline void writeInt32BigEndian(int32_t value, unsigned char* out)
@@ -70,12 +100,82 @@ static inline void writeFloat32BigEndian(float value, unsigned char* out)
     out[3] = (unsigned char)(conv.u & 0xFF);
 }
 
+// Static buffer for CAN frame data (reused to avoid stack overflow)
+static unsigned char canFrameData[8];
+
 static inline void sendVariableSetFrame(int32_t varHash, float value)
 {
-    unsigned char data[8];
-    writeInt32BigEndian(varHash, &data[0]);
-    writeFloat32BigEndian(value, &data[4]);
-    CAN.sendMsgBuf(CAN_ID_VARIABLE_SET, 0, 8, data);
+    writeInt32BigEndian(varHash, &canFrameData[0]);
+    writeFloat32BigEndian(value, &canFrameData[4]);
+    CAN.sendMsgBuf(CAN_ID_VARIABLE_SET, 0, 8, canFrameData);
+}
+
+// ---------------- VSS Interrupt Service Routines ----------------
+// ISR for FrontLeft (D20, INT1)
+ISR(INT1_vect) {
+    // Simple increment - prevent overflow by checking before increment
+    if (vssChannels[0].edgeCount < 0xFFFFFFFE) {
+        vssChannels[0].edgeCount++;
+    }
+}
+
+// ISR for FrontRight (D21, INT0)
+ISR(INT0_vect) {
+    if (vssChannels[1].edgeCount < 0xFFFFFFFE) {
+        vssChannels[1].edgeCount++;
+    }
+}
+
+// ISR for RearLeft (D18, INT3)
+ISR(INT3_vect) {
+    if (vssChannels[2].edgeCount < 0xFFFFFFFE) {
+        vssChannels[2].edgeCount++;
+    }
+}
+
+// ISR for RearRight (D19, INT2)
+ISR(INT2_vect) {
+    if (vssChannels[3].edgeCount < 0xFFFFFFFE) {
+        vssChannels[3].edgeCount++;
+    }
+}
+
+// ---------------- VSS Rate Calculation ----------------
+void calculateVSSRates() {
+    static unsigned long lastCalcTime = 0;
+    unsigned long now = millis();
+    
+    // Handle millis() overflow (wraps every ~49.7 days)
+    // Unsigned subtraction handles wrap correctly if interval is reasonable
+    unsigned long timeDelta = now - lastCalcTime;
+    
+    // Check for valid time delta (handles overflow case where now < lastCalcTime)
+    // Also ensure delta is reasonable (not more than 1 second, which would indicate overflow issue)
+    if (timeDelta >= VSS_CALC_INTERVAL_MS && timeDelta < 1000) {
+        float timeDeltaSeconds = timeDelta / 1000.0f;
+        
+        for (uint8_t i = 0; i < 4; ++i) {
+            // Atomic read of volatile counter
+            uint32_t currentCount = vssChannels[i].edgeCount;
+            // Unsigned subtraction handles counter overflow correctly
+            uint32_t countDelta = currentCount - vssChannels[i].lastCount;
+            
+            // Calculate pulses per second
+            vssChannels[i].pulsesPerSecond = countDelta / timeDeltaSeconds;
+            vssChannels[i].lastCount = currentCount;
+        }
+        lastCalcTime = now;
+    }
+    // If timeDelta is too large (overflow case), skip calculation and reset
+    else if (timeDelta >= 1000) {
+        // Likely overflow occurred, reset timing
+        lastCalcTime = now;
+        // Optionally reset counters or set rates to 0
+        for (uint8_t i = 0; i < 4; ++i) {
+            vssChannels[i].lastCount = vssChannels[i].edgeCount;
+            vssChannels[i].pulsesPerSecond = 0.0f;
+        }
+    }
 }
 
 
@@ -92,7 +192,8 @@ void setup()
         delay(100);
     }
     Serial.println("CAN BUS OK!");
-
+    delay(10);
+    
     // Configure analog inputs A0-A15 with internal pullup enabled
     // Note: Pullup will pull floating pins to ~5V (affects ADC readings)
     for (uint8_t i = 0; i < 16; ++i)
@@ -100,11 +201,52 @@ void setup()
         pinMode(A0 + i, INPUT_PULLUP);
     }
     
-    // Configure digital button inputs D20-D34
-    for (uint8_t pin = 20; pin <= 34; ++pin)
+    // Configure digital button inputs D22-D37 (16 bits)
+    for (uint8_t pin = 22; pin <= 37; ++pin)
     {
         pinMode(pin, INPUT_PULLUP);
     }
+    
+    // Disable I2C (TWEN bit in TWCR) to free D20/D21 for VSS interrupts
+    // This prevents conflicts with I2C hardware
+    TWCR &= ~(1<<TWEN);
+    
+    // Configure VSS interrupt pins (D18, D19, D20, D21)
+    // Pullups enabled to prevent interrupt storms when pins are floating
+    // VR conditioner signals will override pullup when connected
+    #if VSS_ENABLE_PULLUP
+        pinMode(VSS_FRONT_LEFT_PIN, INPUT_PULLUP);
+        pinMode(VSS_FRONT_RIGHT_PIN, INPUT_PULLUP);
+        pinMode(VSS_REAR_LEFT_PIN, INPUT_PULLUP);
+        pinMode(VSS_REAR_RIGHT_PIN, INPUT_PULLUP);
+    #else
+        pinMode(VSS_FRONT_LEFT_PIN, INPUT);
+        pinMode(VSS_FRONT_RIGHT_PIN, INPUT);
+        pinMode(VSS_REAR_LEFT_PIN, INPUT);
+        pinMode(VSS_REAR_RIGHT_PIN, INPUT);
+    #endif
+    
+    // Disable interrupts while configuring registers
+    cli();
+    
+    // Configure external interrupts for falling edge detection
+    // INT1 (D20): Falling edge (configured in EICRA)
+    EICRA |= (1<<ISC11) | (0<<ISC10);
+    
+    // INT0 (D21): Falling edge (configured in EICRA)
+    EICRA |= (1<<ISC01) | (0<<ISC00);
+    
+    // INT3 (D18): Falling edge (configured in EICRB)
+    EICRB |= (1<<ISC31) | (0<<ISC30);
+    
+    // INT2 (D19): Falling edge (configured in EICRB)
+    EICRB |= (1<<ISC21) | (0<<ISC20);
+    
+    // Enable external interrupts
+    EIMSK |= (1<<INT1) | (1<<INT0) | (1<<INT3) | (1<<INT2);
+    
+    // Re-enable global interrupts
+    sei();
 }
 
 
@@ -121,7 +263,10 @@ void loop()
         
     }
 
-    // Periodic transmission of analog and digital inputs
+    // Calculate VSS rates (runs every VSS_CALC_INTERVAL_MS)
+    calculateVSSRates();
+    
+    // Periodic transmission of analog, digital, and VSS inputs
     static unsigned long lastTxMs = 0;
     unsigned long nowMs = millis();
     if (nowMs - lastTxMs >= TRANSMIT_INTERVAL_MS)
@@ -134,25 +279,37 @@ void loop()
             int adc = analogRead(A0 + i);
             float value = (float)adc;
             sendVariableSetFrame(VAR_HASH_ANALOG[i], value);
-            // Serial.print("Analog ");
-            // Serial.print(i);
-            // Serial.print(": ");
-            // Serial.println(value);
+            // Small delay to prevent overwhelming CAN controller
+            delayMicroseconds(200);
         }
 
-        // Pack D20..D34 into 15-bit field (bit0=D20 ... bit14=D34)
+        // Pack D22..D37 into 16-bit field (bit0=D22 ... bit15=D37)
         // Inverted logic: LOW (grounded) = 1, HIGH (pullup active/unconnected) = 0
         uint16_t bits = 0;
-        for (uint8_t pin = 20; pin <= 34; ++pin)
+        for (uint8_t pin = 22; pin <= 37; ++pin)
         {
-            uint8_t bitIndex = (uint8_t)(pin - 20);
+            uint8_t bitIndex = (uint8_t)(pin - 22);
             int state = digitalRead(pin);
             if (state == LOW)  // Grounded = report as 1
             {
                 bits |= (uint16_t)(1u << bitIndex);
             }
         }
-        sendVariableSetFrame(VAR_HASH_D20_D34, (float)bits);
+        sendVariableSetFrame(VAR_HASH_D22_D37, (float)bits);
+        delayMicroseconds(200);
+        
+        // Transmit VSS values (pulses per second)
+        const int32_t vssHashes[4] = {
+            VAR_HASH_VSS_FRONT_LEFT,
+            VAR_HASH_VSS_FRONT_RIGHT,
+            VAR_HASH_VSS_REAR_LEFT,
+            VAR_HASH_VSS_REAR_RIGHT
+        };
+        
+        for (uint8_t i = 0; i < 4; ++i) {
+            sendVariableSetFrame(vssHashes[i], vssChannels[i].pulsesPerSecond);
+            delayMicroseconds(200);
+        }
     }
 }
 

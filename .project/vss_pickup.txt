@@ -1,0 +1,35 @@
+I wand to add reading of VSS to the project.
+use arduino mega2560's interrupt inputs to count edges convert that to a generic pulses per second that can be sent over canbus to the ecu.
+
+the variables for wheel speeds are:
+{
+    "name": "canVSSFrontLeft",
+    "hash": -1645222329,
+    "source": "output"
+  },
+  {
+    "name": "canVSSFrontRight",
+    "hash": 1549498074,
+    "source": "output"
+  },
+  {
+    "name": "canVSSRearLeft",
+    "hash": 768443592,
+    "source": "output"
+  },
+  {
+    "name": "canVSSRearRight",
+    "hash": -403905157,
+    "source": "output"
+  },
+
+
+hashes from the above are used in variable_set frames
+
+so we need to create a variable_set frame for each of the above variables with the hash and the value of the pulses per second.
+
+using interrupt handlers to count edges (probably falling edges, as we'll want users to hook up an external VR conditioner)
+
+count the edges, convert to pulses per second and send that over canbus for the 4 wheels.
+
+provide mapping of digital pins to be used on the mega to what wheel sensor is connected to what pin.

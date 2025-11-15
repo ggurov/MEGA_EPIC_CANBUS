@@ -7,9 +7,10 @@
 ┌─────────────────────────────────────┐
 │     I/O Layer (Pin Management)      │
 │  - Analog reads (A0-A15)            │
-│  - Digital reads (D20-D34)          │
+│  - Digital reads (D22-D37)          │
 │  - Digital writes (D35-D49)         │
 │  - PWM outputs (D2-D13, D44-D46)    │
+│  - VSS interrupts (D18-D21)         │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
@@ -197,16 +198,17 @@ void loop() {
 
 ## Future Architectural Considerations
 
-### Interrupt Counters
-External interrupt on D18-D21 for high-speed counters:
+### VSS Interrupt Counters
+External interrupts on D18-D21 (INT3, INT2, INT1, INT0) for wheel speed sensors:
 ```cpp
-volatile uint32_t wheelSpeedCount = 0;
+volatile uint32_t vssEdgeCount[4] = {0, 0, 0, 0};
 
-void wheelSpeedISR() {
-  wheelSpeedCount++;
-}
+ISR(INT3_vect) { vssEdgeCount[2]++; }  // D18, RearLeft
+ISR(INT2_vect) { vssEdgeCount[3]++; }  // D19, RearRight
+ISR(INT1_vect) { vssEdgeCount[0]++; }  // D20, FrontLeft
+ISR(INT0_vect) { vssEdgeCount[1]++; }  // D21, FrontRight
 ```
-Report delta counts periodically to ECU.
+**Note:** VSS pins configured with internal pullups to prevent interrupt storms when floating. VR conditioner signals will override pullup when connected. Calculate pulses per second in main loop, report to ECU via variable_set frames.
 
 ### Asynchronous ADC
 Use ATmega2560 ADC interrupt mode for true non-blocking analog reads. Requires more complex state machine.
