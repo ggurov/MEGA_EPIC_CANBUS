@@ -1,0 +1,4 @@
+I want to augment the transmission of variable_set frames to be more intelligent.
+It should check if the value has changed since the last transmission and send it quicker, but if it hasn't it should wait longer between transmission of the same value
+It should still read the input pins (analog, digital, and vss) and send them over canbus on their own schedules
+Implement a simple state machine to handle this.
