@@ -18,6 +18,9 @@
 
 MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 
+
+#define SLOW_OUT_REQUEST_INTERVAL_MS 50
+
 // ECU and EPIC CAN configuration
 #define ECU_CAN_ID  1
 #define CAN_ID_VAR_REQUEST        (0x700 + ECU_CAN_ID)
@@ -59,6 +62,9 @@ const int32_t VAR_HASH_ANALOG[16] = {
 
 // EPIC variable hash for packed digital inputs D22-D37 bitfield (16 bits)
 const int32_t VAR_HASH_D22_D37 = 2138825443;
+
+// EPIC variable hash for slow GPIO outputs bitfield (D39–D43, D47–D49)
+const int32_t VAR_HASH_OUT_SLOW = 1430780106;
 
 // VSS (Vehicle Speed Sensor) configuration
 // Wheel-to-pin mapping:
@@ -116,6 +122,9 @@ static float currentAnalogValues[16] = {0};
 static uint16_t currentDigitalBits = 0;
 static float currentVssValues[4] = {0};
 
+// Slow GPIO output pins (bit0..bit7 → D39, D40, D41, D42, D43, D47, D48, D49)
+const uint8_t SLOW_GPIO_PINS[8] = {39, 40, 41, 42, 43, 47, 48, 49};
+
 // ---------------- Internal helpers ----------------
 static inline void writeInt32BigEndian(int32_t value, unsigned char* out)
 {
@@ -135,7 +144,27 @@ static inline void writeFloat32BigEndian(float value, unsigned char* out)
     out[3] = (unsigned char)(conv.u & 0xFF);
 }
 
-// Static buffer for CAN frame data (reused to avoid stack overflow)
+static inline int32_t readInt32BigEndian(const unsigned char* in)
+{
+    int32_t value = 0;
+    value |= ((int32_t)in[0] << 24);
+    value |= ((int32_t)in[1] << 16);
+    value |= ((int32_t)in[2] << 8);
+    value |= ((int32_t)in[3]);
+    return value;
+}
+
+static inline float readFloat32BigEndian(const unsigned char* in)
+{
+    union { float f; uint32_t u; } conv;
+    conv.u =  ((uint32_t)in[0] << 24)
+            | ((uint32_t)in[1] << 16)
+            | ((uint32_t)in[2] << 8)
+            | ((uint32_t)in[3]);
+    return conv.f;
+}
+
+// Static buffer for CAN frame data (reused to avoid stack/heap churn)
 static unsigned char canFrameData[8];
 
 static inline void sendVariableSetFrame(int32_t varHash, float value)
@@ -143,6 +172,13 @@ static inline void sendVariableSetFrame(int32_t varHash, float value)
     writeInt32BigEndian(varHash, &canFrameData[0]);
     writeFloat32BigEndian(value, &canFrameData[4]);
     CAN.sendMsgBuf(CAN_ID_VARIABLE_SET, 0, 8, canFrameData);
+}
+
+static inline void sendVariableRequestFrame(int32_t varHash)
+{
+    writeInt32BigEndian(varHash, &canFrameData[0]);
+    // Request frame is 4-byte hash payload
+    CAN.sendMsgBuf(CAN_ID_VAR_REQUEST, 0, 4, canFrameData);
 }
 
 // ---------------- VSS Interrupt Service Routines ----------------
@@ -319,6 +355,13 @@ void setup()
         pinMode(pin, INPUT_PULLUP);
     }
     
+    // Configure slow GPIO outputs (low-speed outputs)
+    for (uint8_t i = 0; i < 8; ++i)
+    {
+        pinMode(SLOW_GPIO_PINS[i], OUTPUT);
+        digitalWrite(SLOW_GPIO_PINS[i], LOW);
+    }
+
     // Disable I2C (TWEN bit in TWCR) to free D20/D21 for VSS interrupts
     // This prevents conflicts with I2C hardware
     TWCR &= ~(1<<TWEN);
@@ -387,18 +430,51 @@ void loop()
     unsigned char len = 0;
     unsigned char buf[8];
 
-    if(CAN_MSGAVAIL == CAN.checkReceive())            // check if data coming
+    // Handle any pending CAN frames
+    if(CAN_MSGAVAIL == CAN.checkReceive())
     {
-        CAN.readMsgBuf(&len, buf);    // read data,  len: data length, buf: data buf
-
+        CAN.readMsgBuf(&len, buf);
         unsigned long canId = CAN.getCanId();
-        
+
+        // Handle variable response frames for slow GPIO outputs
+        if (canId == CAN_ID_VAR_RESPONSE && len == 8)
+        {
+            int32_t hash = readInt32BigEndian(&buf[0]);
+            if (hash == VAR_HASH_OUT_SLOW)
+            {
+                float value = readFloat32BigEndian(&buf[4]);
+
+                // Treat value as integer bitfield (0..255) encoded as float
+                uint32_t rawBits = (value >= 0.0f) ? (uint32_t)(value + 0.5f) : 0u;
+                uint8_t bits = (uint8_t)(rawBits & 0xFFu);
+
+                // Map bits to slow GPIO pins (bit0 → D39 ... bit7 → D49)
+                for (uint8_t i = 0; i < 8; ++i)
+                {
+                    uint8_t pin = SLOW_GPIO_PINS[i];
+                    if (bits & (1u << i)) {
+                        digitalWrite(pin, HIGH);
+                    } else {
+                        digitalWrite(pin, LOW);
+                    }
+                }
+            }
+        }
     }
 
     // Calculate VSS rates (runs every VSS_CALC_INTERVAL_MS)
     calculateVSSRates();
     
     unsigned long nowMs = millis();
+
+    // Periodically request slow GPIO output state from ECU
+    static unsigned long lastSlowOutRequestMs = 0;
+
+    if (nowMs - lastSlowOutRequestMs >= SLOW_OUT_REQUEST_INTERVAL_MS)
+    {
+        lastSlowOutRequestMs = nowMs;
+        sendVariableRequestFrame(VAR_HASH_OUT_SLOW);
+    }
     
     // Read inputs at fixed interval (independent of transmission)
     static unsigned long lastReadMs = 0;
