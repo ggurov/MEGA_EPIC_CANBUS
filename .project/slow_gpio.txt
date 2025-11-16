@@ -1,0 +1,48 @@
+Implement slow GPIO output functionality.
+
+1. create a function to request variables, described in the epic_can_bus_spec.txt file (and here below)
+
+
+### Request Frame (`0x700 + ecuCanId`)
+
+```
+DLC: 4 bytes
+Byte [0..3]: Variable Hash (int32, big-endian, two's complement)
+```
+
+**Example**: Request variable with hash `-230533156` (0xF242A4DC)
+```
+CAN ID: 0x700 + ecuCanId
+Data: [F2 42 A4 DC]
+```
+
+### Response Frame (`0x720 + ecuCanId`)
+
+```
+DLC: 8 bytes
+Byte [0..3]: Variable Hash (int32, big-endian) - echo of requested hash
+Byte [4..7]: Variable Value (float32, big-endian)
+```
+
+**Example**: Response with value `123.45`
+```
+CAN ID: 0x720 + ecuCanId
+Data: [F2 42 A4 DC] [42 F6 E6 66]
+      └─── Hash ───┘ └── Value ──┘
+```
+
+2. using the hash below
+
+  {
+    "name": "MEGA_EPIC_1_OUT_SLOW",
+    "hash": 1430780106,
+    "source": "output"
+  },
+
+use the variable request function to request the above variable.
+
+
+3. implement listening for ECU's response to the above variable request.
+
+4. use the response from the ECU to set digital states of digital pins D39–D43, D47–D49 based on the value of the variable ECU sends back.
+

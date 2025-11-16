@@ -27,7 +27,7 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 - **Analog inputs**: A0–A15
 - **PWM outputs (planned)**: D2, D3, D5, D6, D7, D8, D11, D12, D44, D45, D46 (D9 used by CS)
 - **Digital button inputs**: D22–D37 (16-bit packed, INPUT_PULLUP, inverted logic)
-- **Digital low-speed outputs (planned)**: D39–D43, D47–D49
+- **Digital low-speed outputs**: D39–D43, D47–D49
 - **VSS inputs** (wheel speed):
   - D18: Front Left (INT3)
   - D19: Front Right (INT2)
