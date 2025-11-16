@@ -8,7 +8,7 @@
 │     I/O Layer (Pin Management)      │
 │  - Analog reads (A0-A15)            │
 │  - Digital reads (D22-D37)          │
-│  - Digital writes (D35-D49)         │
+│  - Digital writes (D39-D43, D47-D49)│
 │  - PWM outputs (D2-D13, D44-D46)    │
 │  - VSS interrupts (D18-D21)         │
 └──────────────┬──────────────────────┘
@@ -53,6 +53,17 @@ variable_map.h             - Variable hash to I/O mappings
    - Bytes 4-7: Value (big-endian float32)
 4. **Transmit:** `CAN.sendMsgBuf()` with DLC=8
 5. **No ACK:** Fire-and-forget pattern
+
+### Smart Transmission Pattern (On-change + Heartbeat)
+1. **Sample:** Inputs (analog, digital, VSS) read on a fixed schedule (e.g., 25 ms)
+2. **Detect Change:** Compare current value against last transmitted value using thresholds (analog/VSS) or exact match (digital bitfield)
+3. **State Machine:** Per-channel state (`CHANGED` vs `STABLE`) updated based on detection step
+4. **Schedule:** 
+   - `CHANGED`: permit TX at fast interval (e.g., 25 ms)
+   - `STABLE`: permit TX only at slow heartbeat interval (e.g., 500 ms)
+5. **Transmit:** When allowed by state/interval, send variable_set frame and update last transmitted value/timestamp
+
+**Rationale:** Reduces CAN load when values are stable while keeping low latency on changes. Uses unsigned `millis()` subtraction to remain safe across overflow.
 
 ### Digital Output Flow (ECU → Mega)
 1. **Request:** Mega sends variable_request frame (0x700 + ecuCanId)

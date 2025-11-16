@@ -61,10 +61,15 @@ const int32_t VAR_HASH_ANALOG[16] = {
 const int32_t VAR_HASH_D22_D37 = 2138825443;
 
 // VSS (Vehicle Speed Sensor) configuration
-#define VSS_FRONT_LEFT_PIN   20  // INT1
-#define VSS_FRONT_RIGHT_PIN  21  // INT0
-#define VSS_REAR_LEFT_PIN    18  // INT3
-#define VSS_REAR_RIGHT_PIN   19  // INT2
+// Wheel-to-pin mapping:
+// - FrontLeft  -> D18 (INT3)
+// - FrontRight -> D19 (INT2)
+// - RearLeft   -> D20 (INT1)
+// - RearRight  -> D21 (INT0)
+#define VSS_FRONT_LEFT_PIN   18  // INT3
+#define VSS_FRONT_RIGHT_PIN  19  // INT2
+#define VSS_REAR_LEFT_PIN    20  // INT1
+#define VSS_REAR_RIGHT_PIN   21  // INT0
 #define VSS_CALC_INTERVAL_MS 200 // Rate calculation interval
 #define VSS_ENABLE_PULLUP    1   // Internal pullups enabled to prevent interrupt storms when pins are floating
 
@@ -141,30 +146,30 @@ static inline void sendVariableSetFrame(int32_t varHash, float value)
 }
 
 // ---------------- VSS Interrupt Service Routines ----------------
-// ISR for FrontLeft (D20, INT1)
-ISR(INT1_vect) {
+// ISR for FrontLeft (D18, INT3)
+ISR(INT3_vect) {
     // Simple increment - prevent overflow by checking before increment
     if (vssChannels[0].edgeCount < 0xFFFFFFFE) {
         vssChannels[0].edgeCount++;
     }
 }
 
-// ISR for FrontRight (D21, INT0)
-ISR(INT0_vect) {
+// ISR for FrontRight (D19, INT2)
+ISR(INT2_vect) {
     if (vssChannels[1].edgeCount < 0xFFFFFFFE) {
         vssChannels[1].edgeCount++;
     }
 }
 
-// ISR for RearLeft (D18, INT3)
-ISR(INT3_vect) {
+// ISR for RearLeft (D20, INT1)
+ISR(INT1_vect) {
     if (vssChannels[2].edgeCount < 0xFFFFFFFE) {
         vssChannels[2].edgeCount++;
     }
 }
 
-// ISR for RearRight (D19, INT2)
-ISR(INT2_vect) {
+// ISR for RearRight (D21, INT0)
+ISR(INT0_vect) {
     if (vssChannels[3].edgeCount < 0xFFFFFFFE) {
         vssChannels[3].edgeCount++;
     }
@@ -337,17 +342,17 @@ void setup()
     cli();
     
     // Configure external interrupts for falling edge detection
-    // INT1 (D20): Falling edge (configured in EICRA)
+    // INT3 (D18, FrontLeft): Falling edge (configured in EICRB)
+    EICRB |= (1<<ISC31) | (0<<ISC30);
+
+    // INT2 (D19, FrontRight): Falling edge (configured in EICRB)
+    EICRB |= (1<<ISC21) | (0<<ISC20);
+
+    // INT1 (D20, RearLeft): Falling edge (configured in EICRA)
     EICRA |= (1<<ISC11) | (0<<ISC10);
     
-    // INT0 (D21): Falling edge (configured in EICRA)
+    // INT0 (D21, RearRight): Falling edge (configured in EICRA)
     EICRA |= (1<<ISC01) | (0<<ISC00);
-    
-    // INT3 (D18): Falling edge (configured in EICRB)
-    EICRB |= (1<<ISC31) | (0<<ISC30);
-    
-    // INT2 (D19): Falling edge (configured in EICRB)
-    EICRB |= (1<<ISC21) | (0<<ISC20);
     
     // Enable external interrupts
     EIMSK |= (1<<INT1) | (1<<INT0) | (1<<INT3) | (1<<INT2);

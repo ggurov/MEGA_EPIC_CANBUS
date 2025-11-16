@@ -1,6 +1,6 @@
 # Progress: MEGA_EPIC_CANBUS
 
-**Last Updated:** October 30, 2025
+**Last Updated:** November 16, 2025
 
 ## Implementation Status
 
@@ -20,7 +20,7 @@
 - Performance constraints documented
 
 ### 🚧 In Progress
-- None (awaiting next development phase)
+- Smart transmission tuning and validation
 
 ### ❌ Not Started
 
@@ -37,33 +37,34 @@
 - [x] Periodic sampling (analogRead loop)
 - [x] ADC to float32 conversion
 - [x] Variable_set frame composition
-- [x] Transmission scheduling/throttling
+- [x] Smart transmission integration (on-change + heartbeat)
 - [x] Variable hash mapping for 16 channels
 
 #### Digital Input Module
-- [x] D22-D37 pin initialization (INPUT_PULLUP)
+- [x] D22-D37 pin initialization (INPUT_PULLUP, inverted logic)
 - [x] Digital read loop
 - [x] Bitfield packing (16 bits)
-- [x] Variable_set frame transmission
+- [x] Smart transmission integration (on-change + heartbeat)
 - [ ] Debouncing logic (if needed)
 
 #### VSS (Vehicle Speed Sensor) Module
-- [x] D18-D21 pin initialization (configurable pullup)
+- [x] D18-D21 pin initialization (configurable pullup, default enabled)
 - [x] External interrupt configuration (INT3, INT2, INT1, INT0)
 - [x] ISR implementation for edge counting
 - [x] Rate calculation (pulses per second)
+- [x] Smart transmission integration (on-change + heartbeat)
 - [x] CAN transmission of VSS values
 - [x] Overflow handling for counters and time
 
 #### Digital Output Module
-- [ ] D35-D49 pin initialization (OUTPUT)
+- [ ] D39-D43, D47-D49 pin initialization (OUTPUT)
 - [ ] Variable request for output states
 - [ ] Bitfield unpacking
 - [ ] digitalWrite application
 - [ ] Polling/update strategy
 
 #### PWM Output Module
-- [ ] D2-D8, D10-D13, D44-D46 pin initialization
+- [ ] D2, D3, D5, D6, D7, D8, D11, D12, D44, D45, D46 pin initialization
 - [ ] Variable request for PWM parameters
 - [ ] Percentage to 0-255 conversion
 - [ ] analogWrite application
@@ -93,25 +94,25 @@
 
 ## What Works
 
-### Basic CAN Reception
+### CAN TX/RX and I/O Transmission
 Current sketch successfully:
 - Initializes MCP_CAN at 500 kbps
-- Polls for incoming CAN frames
-- Reads frame data and CAN ID
-- Outputs to Serial monitor (115200 baud)
+- Polls for incoming CAN frames and reads data/ID
+- Samples analog inputs A0-A15 and sends them as variable_set frames
+- Reads digital inputs D22-D37, packs them into a 16-bit bitfield, and sends as a variable_set frame
+- Counts VSS pulses on D18-D21 using external interrupts, calculates pulses per second, and sends as variable_set frames
+- Uses a smart transmission layer to reduce CAN load (fast TX on change, slower heartbeat when stable)
 
-**Tested:** CAN bus hardware communication verified (receive path)
+**Tested:** CAN bus transmission verified; board stable under continuous TX with VSS pullups enabled.
 
 ## What Doesn't Work Yet
 
-### Everything Else
-- No CAN transmission capability
-- No EPIC protocol parsing or handling
-- No I/O reading or control
-- No variable mapping
-- No error handling
-
-**Current State:** Receive-only skeleton code
+### Remaining Gaps
+- No EPIC protocol frame parsing or higher-level request/response handling
+- No digital output implementation on planned low-speed outputs (D39-D43, D47-D49)
+- No PWM output implementation on planned PWM pins
+- No error handling or recovery (TX failure handling, bus-off recovery)
+- No watchdog or safe-mode output strategy
 
 ## Blockers & Decisions Needed
 
@@ -148,10 +149,9 @@ Current sketch successfully:
 ## Known Issues
 
 ### Current Code Issues
-1. **No TX Capability:** Cannot send CAN frames yet
-2. **Polling Overhead:** Polling `checkReceive()` wastes CPU cycles
-3. **No Error Handling:** Silent failures on invalid frames
-4. **No I/O Initialization:** Pins not configured
+1. **Polling Overhead:** Polling `checkReceive()` wastes CPU cycles
+2. **No Error Handling:** Silent failures on invalid frames or TX errors
+3. **No EPIC Protocol RX Handling:** Variable requests/responses and function calls unimplemented
 
 ### Documentation Gaps
 1. Variable hash documentation missing (need generated variable list)

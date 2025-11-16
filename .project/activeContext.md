@@ -1,7 +1,7 @@
 # Active Context: MEGA_EPIC_CANBUS
 
 ## Current Status
-**Phase:** Phase 1 Complete - Analog, Digital, and VSS I/O Transmission  
+**Phase:** Phase 1 Complete - Analog, Digital, VSS I/O Transmission + Smart TX  
 **Last Updated:** Current
 
 ## Current Implementation
@@ -11,6 +11,7 @@ Firmware (`mega_epic_canbus.ino`) implements:
 - Analog inputs (A0-A15): Periodic sampling, float32 conversion, CAN transmission
 - Digital inputs (D22-D37): 16-bit bitfield packing, inverted logic, CAN transmission
 - VSS inputs (D18-D21): Interrupt-driven edge counting, rate calculation, CAN transmission
+- Smart transmission layer: per-channel change detection and adaptive TX intervals (fast on-change, slow heartbeat when stable)
 - Big-endian byte conversion utilities
 - Overflow-safe counter and time handling
 
@@ -22,37 +23,30 @@ Firmware (`mega_epic_canbus.ino`) implements:
 
 ## Immediate Next Steps
 
-### 1. Define ECU CAN ID
-- Select ecuCanId (0-15) for this Mega device
-- Document decision in code and Memory Bank
-- Impacts all CAN ID calculations (0x700+ecuCanId, etc.)
-
-### 2. Implement EPIC Protocol Frame Parsing
+### 1. Implement EPIC Protocol Frame Parsing
 - Parse incoming CAN IDs to identify EPIC frame types
 - Implement variable request/response handling
 - Implement variable set reception
 - Implement function call request/response
 - Big-endian byte order conversion utilities
 
-### 3. Design Variable Mapping Scheme
+### 2. Design Variable Mapping Scheme
 **Critical Decision Needed:**
 - How to map Mega I/O to epicEFI variable hashes
 - Static compile-time mapping vs. runtime configuration
 - Variable naming convention
 - Documentation of hash → I/O mapping
 
-### 4. Implement Analog Input Module
-- Read A0-A15 using `analogRead()`
-- Periodic sampling strategy (e.g., 100Hz per channel)
-- Pack raw ADC values (0-1023) as float32
-- Send as variable_set frames (0x780 + ecuCanId)
-- Handle transmission timing/throttling
-
-### 5. Implement Digital Output Module
-- Initialize D35-D49 as OUTPUT
+### 3. Implement Digital Output Module
+- Initialize planned low-speed outputs D39, D40, D41, D42, D43, D47, D48, D49 as OUTPUT
 - Request output states from ECU via variable_request
 - Unpack bitfield from variable_response
 - Apply states via digitalWrite()
+
+### 4. Implement PWM Output Module
+- Initialize planned PWM outputs D2, D3, D5, D6, D7, D8, D11, D12, D44, D45, D46
+- Define variable hashes and mapping for PWM channels
+- Implement duty cycle → timer/PWM configuration
 
 ## Current Questions/Blockers
 
@@ -80,12 +74,13 @@ Firmware (`mega_epic_canbus.ino`) implements:
 - **Digital Inputs:** D22-D37 (16 pins, 16-bit bitfield)
 - **VSS Pins:** D18-D21 (INT3, INT2, INT1, INT0) for consistent interrupt behavior
 - **VSS Calculation:** 100ms interval for rate calculation
-- **Transmission Interval:** 25ms for all I/O updates
+- **Smart TX Strategy:** Inputs sampled at 25 ms; changed values transmitted at 25 ms fast interval; stable values transmitted at ~500 ms heartbeat
+- **Pin Planning:** PWM outputs on D2, D3, D5, D6, D7, D8, D11, D12, D44, D45, D46; low-speed outputs on D39, D40, D41, D42, D43, D47, D48, D49; documented in `PINOUT.md`
 
 ## Known Issues
 - No EPIC protocol frame parsing (RX only, no handling)
-- No digital output implementation (D35-D49)
-- No PWM output implementation
+- No digital output implementation on planned low-speed outputs
+- No PWM output implementation (timers not yet configured for MEGA_EPIC_* PWM channels)
 - No error handling or recovery
 - No watchdog timer
 

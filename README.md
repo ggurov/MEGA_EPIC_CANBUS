@@ -4,15 +4,15 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 
 ### Features
 - **16 analog inputs**: A0–A15 (0–5V)
-- **14 PWM outputs**: D2–D8, D10–D13, D44–D46
-- **15 digital button inputs**: D20–D34
-- **15 digital low-speed outputs**: D35–D49
+- **PWM outputs** (planned): D2–D8, D10–D13, D44–D46
+- **digital button inputs**: D22–D37
+- **digital low-speed outputs** (planned): D39–D43, D47–D49
 - **CAN 500 kbps** via MCP2515 (`CS=D9`, SPI on D50–D53)
 - EPIC protocol operations: variable request/response, variable set, function call
 
 ### Status
-- Current: receive-only CAN scaffold prints frames to Serial (115200)
-- Missing: EPIC frame parsing, transmit helpers, I/O modules, error handling, `ecuCanId` selection
+- Current: CAN TX/RX implemented; analog, digital, and VSS inputs sampled and transmitted using a smart on-change + heartbeat strategy
+- Missing: EPIC frame parsing, digital/PWM output modules, error handling
 
 ### Hardware
 - Arduino Mega2560
@@ -24,10 +24,15 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
   - CAN_H/CAN_L twisted pair with proper 120Ω termination
 
 ### Pin Map Summary
-- **Analog**: A0–A15
-- **PWM**: D2, D3, D4, D5, D6, D7, D8, D10, D11, D12, D13, D44, D45, D46 (D9 used by CS)
-- **Digital inputs**: D20–D34
-- **Digital outputs**: D35–D49
+- **Analog inputs**: A0–A15
+- **PWM outputs (planned)**: D2, D3, D5, D6, D7, D8, D11, D12, D44, D45, D46 (D9 used by CS)
+- **Digital button inputs**: D22–D37 (16-bit packed, INPUT_PULLUP, inverted logic)
+- **Digital low-speed outputs (planned)**: D39–D43, D47–D49
+- **VSS inputs** (wheel speed):
+  - D18: Front Left (INT3)
+  - D19: Front Right (INT2)
+  - D20: Rear Left (INT1, I2C SDA disabled)
+  - D21: Rear Right (INT0, I2C SCL disabled)
 
 ### Protocol (EPIC_CAN_BUS)
 - Base IDs (11-bit standard):

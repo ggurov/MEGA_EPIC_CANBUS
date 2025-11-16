@@ -25,25 +25,23 @@ Available external interrupt pins:
 - **D21:** INT0 (currently used for digital button inputs and I2C)
 
 ### Pin Mapping (Selected for Traction Control Consistency)
-**All 4 sensors use external interrupts for consistent behavior:**
-- **FrontLeft:** D2 (INT4)
-- **FrontRight:** D3 (INT5)
-- **RearLeft:** D18 (INT3)
-- **RearRight:** D19 (INT2)
+**All 4 sensors use external interrupts on a contiguous block of pins:**
+- **FrontLeft:** D18 (INT3)
+- **FrontRight:** D19 (INT2)
+- **RearLeft:** D20 (INT1)
+- **RearRight:** D21 (INT0)
 
-**Decision:** Use D2, D3, D18, D19 - all external interrupts (INT4, INT5, INT3, INT2) for consistent edge detection and ISR behavior. Critical for traction control where all sensors must have identical timing and precision.
-
-**Note:** D2 was previously reserved for MCP_CAN INT. This implementation uses polling for CAN RX (`CAN.checkReceive()`) instead of interrupt-driven CAN, which is acceptable for current throughput requirements.
+**Decision:** Use D18-D21 (INT3, INT2, INT1, INT0) for consistent edge detection and ISR behavior. Critical for traction control where all sensors must have identical timing and precision. MCP_CAN RX remains polling-based (`CAN.checkReceive()`), so D2 is not used for CAN INT in this implementation.
 
 ## Implementation Architecture
 
 ### Data Structures
 ```cpp
 // VSS sensor configuration (all external interrupts for consistency)
-#define VSS_FRONT_LEFT_PIN   2   // INT4
-#define VSS_FRONT_RIGHT_PIN  3   // INT5
-#define VSS_REAR_LEFT_PIN    18  // INT3
-#define VSS_REAR_RIGHT_PIN   19  // INT2
+#define VSS_FRONT_LEFT_PIN   18  // INT3
+#define VSS_FRONT_RIGHT_PIN  19  // INT2
+#define VSS_REAR_LEFT_PIN    20  // INT1
+#define VSS_REAR_RIGHT_PIN   21  // INT0
 
 // Variable hashes for VSS sensors
 const int32_t VAR_HASH_VSS_FRONT_LEFT  = -1645222329;
@@ -70,23 +68,23 @@ VSSChannel vssChannels[4] = {
 
 ### Interrupt Service Routines (ISRs)
 ```cpp
-// ISR for FrontLeft (D2, INT4)
-ISR(INT4_vect) {
+// ISR for FrontLeft (D18, INT3)
+ISR(INT3_vect) {
     vssChannels[0].edgeCount++;
 }
 
-// ISR for FrontRight (D3, INT5)
-ISR(INT5_vect) {
+// ISR for FrontRight (D19, INT2)
+ISR(INT2_vect) {
     vssChannels[1].edgeCount++;
 }
 
-// ISR for RearLeft (D18, INT3)
-ISR(INT3_vect) {
+// ISR for RearLeft (D20, INT1)
+ISR(INT1_vect) {
     vssChannels[2].edgeCount++;
 }
 
-// ISR for RearRight (D19, INT2)
-ISR(INT2_vect) {
+// ISR for RearRight (D21, INT0)
+ISR(INT0_vect) {
     vssChannels[3].edgeCount++;
 }
 ```
@@ -114,19 +112,19 @@ ISR(INT2_vect) {
 
 ### Step 2: Implement Pin Configuration
 In `setup()`:
-- Configure D2, D3, D18, D19 as INPUT (no pullup - external VR conditioner provides signal)
-- Configure INT4 (D2) for falling edge: `EICRB |= (1<<ISC41) | (0<<ISC40);` (falling edge)
-- Configure INT5 (D3) for falling edge: `EICRB |= (1<<ISC51) | (0<<ISC50);` (falling edge)
+- Configure D18, D19, D20, D21 as INPUT / INPUT_PULLUP (depending on `VSS_ENABLE_PULLUP`)
 - Configure INT3 (D18) for falling edge: `EICRB |= (1<<ISC31) | (0<<ISC30);` (falling edge)
 - Configure INT2 (D19) for falling edge: `EICRB |= (1<<ISC21) | (0<<ISC20);` (falling edge)
-- Enable external interrupts: `EIMSK |= (1<<INT4) | (1<<INT5) | (1<<INT3) | (1<<INT2);`
+- Configure INT1 (D20) for falling edge: `EICRA |= (1<<ISC11) | (0<<ISC10);` (falling edge)
+- Configure INT0 (D21) for falling edge: `EICRA |= (1<<ISC01) | (0<<ISC00);` (falling edge)
+- Enable external interrupts: `EIMSK |= (1<<INT3) | (1<<INT2) | (1<<INT1) | (1<<INT0);`
 - Enable global interrupts: `sei()`
 
 ### Step 3: Implement ISRs
-- Implement INT4_vect for FrontLeft (D2)
-- Implement INT5_vect for FrontRight (D3)
-- Implement INT3_vect for RearLeft (D18)
-- Implement INT2_vect for RearRight (D19)
+- Implement INT3_vect for FrontLeft (D18)
+- Implement INT2_vect for FrontRight (D19)
+- Implement INT1_vect for RearLeft (D20)
+- Implement INT0_vect for RearRight (D21)
 
 ### Step 4: Implement Rate Calculation Function
 ```cpp
@@ -189,8 +187,8 @@ for (uint8_t i = 0; i < 4; ++i) {
 - **Update rate:** Calculate every 100ms, transmit every 25ms (use last calculated value)
 
 ### Pin Configuration
-- **No pullup:** VR conditioner provides signal, no internal pullup needed
-- **Input mode:** Standard INPUT mode (not INPUT_PULLUP)
+- **Pullup configurable:** Internal pullups can be enabled to avoid floating pins when sensors disconnected
+- **Input mode:** `INPUT` or `INPUT_PULLUP` depending on configuration
 - **Signal level:** Expect 0-5V digital signal from VR conditioner
 - **Consistency:** All 4 sensors use external interrupts (INT2-INT5) for identical ISR behavior, timing, and edge detection precision. Critical for traction control where sensor-to-sensor timing differences must be minimized.
 

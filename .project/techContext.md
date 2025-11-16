@@ -23,19 +23,21 @@
 
 ### Pin Allocation
 **Analog Inputs (16 pins):**
-- A0-A15: Analog sensors (0-5V range)
+- A0-A15: Analog sensors (0-5V range), sampled and sent over CAN
 
-**PWM Outputs (14 pins):**
-- D2, D3, D4, D5, D6, D7, D8: PWM capable
-- D10, D11, D12, D13: PWM capable
-- D44, D45, D46: PWM capable
-- D9: Reserved for MCP_CAN CS
+**PWM Outputs (planned, 11 pins):**
+- D2, D3, D5: PWM capable (Timer3) — planned as `MEGA_EPIC_1_PWM_T3_D*`
+- D6, D7, D8: PWM capable (Timer4) — planned as `MEGA_EPIC_1_PWM_T4_D*`
+- D11, D12: PWM capable (Timer1) — planned as `MEGA_EPIC_1_PWM_T1_D*`
+- D44, D45, D46: PWM capable (Timer5) — planned as `MEGA_EPIC_1_PWM_T5_D*`
+- D9: Reserved for MCP_CAN CS (not used as PWM)
+- D4, D13: PWM capable via Timer0 (~1 kHz) but effectively reserved (Arduino timing)
 
 **Digital Button Inputs (16 pins):**
-- D22-D37: Digital inputs (internal pullup available, 16-bit bitfield)
+- D22-D37: Digital inputs (INPUT_PULLUP, inverted logic, 16-bit packed bitfield)
 
-**Digital Low-Speed Outputs (15 pins):**
-- D35-D49: Digital outputs
+**Digital Low-Speed Outputs (planned, 8 pins):**
+- D39, D40, D41, D42, D43, D47, D48, D49: Low-speed outputs (`MEGA_EPIC_1_SLOW_D*`)
 
 **VSS (Vehicle Speed Sensor) Inputs (4 pins):**
 - D18, D19, D20, D21: External interrupts (INT3, INT2, INT1, INT0)
