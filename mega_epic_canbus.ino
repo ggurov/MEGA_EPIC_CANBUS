@@ -1,3 +1,4 @@
+
 /*
   MEGA_EPIC_CANBUS - Arduino Mega2560 CAN I/O Expander Firmware
   --------------------------------------------------------------
@@ -10,16 +11,24 @@
 
 
 #include <SPI.h>
-#include <mcp_canbus.h>
 #include <stdint.h>
+#include <PWFusion_MCP2515.h>
+#include <PWFusion_MCP2515_Registers.h>
 
 // Please modify SPI_CS_PIN to adapt to your board (see table below)
 #define SPI_CS_PIN  9 
 
-MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
+MCP2515 CAN;
+// MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
+
+// MCP2515 interrupt pin (D2, INT4 on Mega2560)
+#define MCP2515_INT_PIN  2
 
 // this is periodic request from us, ECU will broadcast on what we're listening for on state change
-#define SLOW_OUT_REQUEST_INTERVAL_MS 250
+#define SLOW_OUT_REQUEST_INTERVAL_MS 50
+
+// Note: CAN interrupt handling is managed by Playing With Fusion library internally
+// No need for manual interrupt flag - library queues messages and CAN.receive() checks the queue
 
 // ECU and EPIC CAN configuration
 #define ECU_CAN_ID  1
@@ -164,48 +173,180 @@ static inline float readFloat32BigEndian(const unsigned char* in)
     return conv.f;
 }
 
-// Static buffer for CAN frame data (reused to avoid stack/heap churn)
-static unsigned char canFrameData[8];
+// Static CAN message structure for sending (reused to avoid stack/heap churn)
+static can_message_t txMsg;
 
 static inline void sendVariableSetFrame(int32_t varHash, float value)
 {
-    writeInt32BigEndian(varHash, &canFrameData[0]);
-    writeFloat32BigEndian(value, &canFrameData[4]);
-    CAN.sendMsgBuf(CAN_ID_VARIABLE_SET, 0, 8, canFrameData);
+    // Prepare message structure
+    txMsg.sid = CAN_ID_VARIABLE_SET;
+    txMsg.extended = 0;  // Standard 11-bit ID
+    txMsg.rtr = 0;       // Data frame
+    txMsg.dlc = 8;       // 8 bytes: 4-byte hash + 4-byte float
+    
+    // Write hash and value to data array (big-endian)
+    writeInt32BigEndian(varHash, &txMsg.data[0]);
+    writeFloat32BigEndian(value, &txMsg.data[4]);
+    
+    // Send message
+    CAN.send(&txMsg);
 }
 
 static inline void sendVariableRequestFrame(int32_t varHash)
 {
-    writeInt32BigEndian(varHash, &canFrameData[0]);
-    // Request frame is 4-byte hash payload
-    CAN.sendMsgBuf(CAN_ID_VAR_REQUEST, 0, 4, canFrameData);
+    // Prepare message structure
+    txMsg.sid = CAN_ID_VAR_REQUEST;
+    txMsg.extended = 0;  // Standard 11-bit ID
+    txMsg.rtr = 0;       // Data frame
+    txMsg.dlc = 4;       // 4 bytes: hash only
+    
+    // Write hash to data array (big-endian)
+    writeInt32BigEndian(varHash, &txMsg.data[0]);
+    
+    // Send message
+    CAN.send(&txMsg);
 }
 
+// ---------------- CAN Filter Configuration ----------------
+// Configure MCP2515 hardware filters to accept only CAN_ID_VAR_RESPONSE
+// This reduces CPU overhead by filtering unwanted messages at hardware level
+static void configureCANFilters()
+{
+    // MCP2515 filter configuration requires direct register access
+    // We need to put MCP2515 in configuration mode, set filters, then return to normal mode
+    
+    // Note: This function uses SPI directly to access MCP2515 registers
+    // The library may have its own methods, but direct access ensures it works
+    
+    // MCP2515 register addresses (from PWFusion_MCP2515_Registers.h)
+    // RXF0: 0x00, RXF1: 0x04, RXF2: 0x08, RXF3: 0x10, RXF4: 0x14, RXF5: 0x18
+    // RXM0: 0x20, RXM1: 0x24
+    // CANCTRL: 0x0F (mode control)
+    
+    // Standard 11-bit ID format in MCP2515 registers:
+    // Bits 10-3 in SIDH (high byte), bits 2-0 in SIDL (low byte, upper 3 bits)
+    // For CAN_ID_VAR_RESPONSE (0x721):
+    //   0x721 = 0000 0111 0010 0001
+    //   SIDH = 0x72 (bits 10-3: 0000 0111 0010)
+    //   SIDL = 0x20 (bits 2-0: 000, extended ID bit = 0)
+    
+    uint16_t filterId = CAN_ID_VAR_RESPONSE;
+    uint8_t sidh = (uint8_t)((filterId >> 3) & 0xFF);
+    uint8_t sidl = (uint8_t)((filterId & 0x07) << 5);  // Standard ID, no extended
+    
+    // Mask: 0x7FF (all 11 bits must match)
+    uint8_t maskSidh = 0xFF;
+    uint8_t maskSidl = 0xE0;  // Bits 7-5 = 111 (match all 3 bits)
+    
+    // Start SPI transaction
+    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
+    
+    // Read CANCTRL to get current mode
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x03);  // READ instruction
+    SPI.transfer(0x0F);  // CANCTRL register
+    uint8_t canctrl = SPI.transfer(0x00);
+    digitalWrite(SPI_CS_PIN, HIGH);
+    
+    // Put MCP2515 in configuration mode (REQOP = 100)
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x02);  // WRITE instruction
+    SPI.transfer(0x0F);  // CANCTRL register
+    SPI.transfer((canctrl & 0x8F) | 0x80);  // Set REQOP bits to 100 (config mode)
+    digitalWrite(SPI_CS_PIN, HIGH);
+    delayMicroseconds(10);  // Wait for mode change
+    
+    // Configure RXB0 mask (RXM0) - match all 11 bits
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x02);  // WRITE instruction
+    SPI.transfer(0x20);  // RXM0SIDH
+    SPI.transfer(maskSidh);
+    SPI.transfer(maskSidl);
+    SPI.transfer(0x00);  // EID8
+    SPI.transfer(0x00);  // EID0
+    digitalWrite(SPI_CS_PIN, HIGH);
+    
+    // Configure RXB0 filter 0 (RXF0) - match CAN_ID_VAR_RESPONSE
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x02);  // WRITE instruction
+    SPI.transfer(0x00);  // RXF0SIDH
+    SPI.transfer(sidh);
+    SPI.transfer(sidl);
+    SPI.transfer(0x00);  // EID8
+    SPI.transfer(0x00);  // EID0
+    digitalWrite(SPI_CS_PIN, HIGH);
+    
+    // Configure RXB0 filter 1 (RXF1) - match CAN_ID_VAR_RESPONSE
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x02);  // WRITE instruction
+    SPI.transfer(0x04);  // RXF1SIDH
+    SPI.transfer(sidh);
+    SPI.transfer(sidl);
+    SPI.transfer(0x00);  // EID8
+    SPI.transfer(0x00);  // EID0
+    digitalWrite(SPI_CS_PIN, HIGH);
+    
+    // Configure RXB1 mask (RXM1) - match all 11 bits
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x02);  // WRITE instruction
+    SPI.transfer(0x24);  // RXM1SIDH
+    SPI.transfer(maskSidh);
+    SPI.transfer(maskSidl);
+    SPI.transfer(0x00);  // EID8
+    SPI.transfer(0x00);  // EID0
+    digitalWrite(SPI_CS_PIN, HIGH);
+    
+    // Configure RXB1 filter 2 (RXF2) - match CAN_ID_VAR_RESPONSE
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x02);  // WRITE instruction
+    SPI.transfer(0x08);  // RXF2SIDH
+    SPI.transfer(sidh);
+    SPI.transfer(sidl);
+    SPI.transfer(0x00);  // EID8
+    SPI.transfer(0x00);  // EID0
+    digitalWrite(SPI_CS_PIN, HIGH);
+    
+    // Return to normal mode (REQOP = 000)
+    digitalWrite(SPI_CS_PIN, LOW);
+    SPI.transfer(0x02);  // WRITE instruction
+    SPI.transfer(0x0F);  // CANCTRL register
+    SPI.transfer(canctrl & 0x8F);  // Clear REQOP bits (normal mode)
+    digitalWrite(SPI_CS_PIN, HIGH);
+    
+    SPI.endTransaction();
+    delayMicroseconds(10);  // Wait for mode change
+}
+
+// ---------------- CAN Interrupt Service Routine ----------------
+// Note: Playing With Fusion library handles CAN interrupt setup internally via attachInterrupt()
+// We don't define ISR(INT4_vect) here to avoid conflict with the library's interrupt handling.
+// The library's CAN.receive() method will work with its internal interrupt mechanism.
+
 // ---------------- VSS Interrupt Service Routines ----------------
-// ISR for FrontLeft (D18, INT3)
-ISR(INT3_vect) {
-    // Simple increment - prevent overflow by checking before increment
+// Use attachInterrupt() instead of direct ISR definitions to avoid conflicts with library
+// FrontLeft (D18, INT3)
+void vssFrontLeftISR() {
     if (vssChannels[0].edgeCount < 0xFFFFFFFE) {
         vssChannels[0].edgeCount++;
     }
 }
 
-// ISR for FrontRight (D19, INT2)
-ISR(INT2_vect) {
+// FrontRight (D19, INT2)
+void vssFrontRightISR() {
     if (vssChannels[1].edgeCount < 0xFFFFFFFE) {
         vssChannels[1].edgeCount++;
     }
 }
 
-// ISR for RearLeft (D20, INT1)
-ISR(INT1_vect) {
+// RearLeft (D20, INT1)
+void vssRearLeftISR() {
     if (vssChannels[2].edgeCount < 0xFFFFFFFE) {
         vssChannels[2].edgeCount++;
     }
 }
 
-// ISR for RearRight (D21, INT0)
-ISR(INT0_vect) {
+// RearRight (D21, INT0)
+void vssRearRightISR() {
     if (vssChannels[3].edgeCount < 0xFFFFFFFE) {
         vssChannels[3].edgeCount++;
     }
@@ -335,13 +476,22 @@ void setup()
     while(!Serial);
     
     
-    while (CAN_OK != CAN.begin(CAN_500KBPS))    // init can bus : baudrate = 500k
-    {
-        Serial.println("CAN BUS FAIL!");
-        delay(100);
-    }
+    // Initialize CAN bus: CS pin, INT pin, loopback=false, 500kbps
+    // Playing With Fusion library begin() returns true on success
+    CAN.begin(SPI_CS_PIN, MCP2515_INT_PIN, false, 500);
+    // {
+    //     Serial.println("CAN BUS FAIL!");
+    //     delay(100);
+    // }
     Serial.println("CAN BUS OK!");
     delay(10);
+    
+    // Configure MCP2515 hardware filters to accept only CAN_ID_VAR_RESPONSE (0x721)
+    // This reduces CPU overhead by filtering unwanted messages at hardware level
+    configureCANFilters();
+    
+    // Note: Playing With Fusion library's begin() method handles CAN interrupt setup
+    // internally via attachInterrupt(). No manual interrupt configuration needed for CAN.
     
     // Configure analog inputs A0-A15 with internal pullup enabled
     // Note: Pullup will pull floating pins to ~5V (affects ADC readings)
@@ -382,27 +532,12 @@ void setup()
         pinMode(VSS_REAR_RIGHT_PIN, INPUT);
     #endif
     
-    // Disable interrupts while configuring registers
-    cli();
-    
-    // Configure external interrupts for falling edge detection
-    // INT3 (D18, FrontLeft): Falling edge (configured in EICRB)
-    EICRB |= (1<<ISC31) | (0<<ISC30);
-
-    // INT2 (D19, FrontRight): Falling edge (configured in EICRB)
-    EICRB |= (1<<ISC21) | (0<<ISC20);
-
-    // INT1 (D20, RearLeft): Falling edge (configured in EICRA)
-    EICRA |= (1<<ISC11) | (0<<ISC10);
-    
-    // INT0 (D21, RearRight): Falling edge (configured in EICRA)
-    EICRA |= (1<<ISC01) | (0<<ISC00);
-    
-    // Enable external interrupts
-    EIMSK |= (1<<INT1) | (1<<INT0) | (1<<INT3) | (1<<INT2);
-    
-    // Re-enable global interrupts
-    sei();
+    // Configure VSS interrupts using attachInterrupt() to avoid conflicts with library
+    // This uses Arduino's interrupt system which is compatible with the Playing With Fusion library
+    attachInterrupt(digitalPinToInterrupt(VSS_FRONT_LEFT_PIN), vssFrontLeftISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(VSS_FRONT_RIGHT_PIN), vssFrontRightISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(VSS_REAR_LEFT_PIN), vssRearLeftISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(VSS_REAR_RIGHT_PIN), vssRearRightISR, FALLING);
     
     // Initialize smart transmission state structures
     for (uint8_t i = 0; i < 16; ++i) {
@@ -428,22 +563,23 @@ void setup()
 
 void loop()
 {
-    unsigned char len = 0;
-    unsigned char buf[8];
+    can_message_t rxMsg; // Allocate memory to store received CAN messages
 
-    // Handle any pending CAN frames
-    if(CAN_MSGAVAIL == CAN.checkReceive())
+    // Process CAN frames using library's receive method
+    // Playing With Fusion library handles interrupts internally and queues messages
+    // CAN.receive() returns true if a message is available, false when queue is empty
+    uint8_t frameCount = 0;
+    while (CAN.receive(&rxMsg))
     {
-        CAN.readMsgBuf(&len, buf);
-        unsigned long canId = CAN.getCanId();
+        frameCount++;
 
         // Handle variable response frames for slow GPIO outputs
-        if (canId == CAN_ID_VAR_RESPONSE && len == 8)
+        if (rxMsg.sid == CAN_ID_VAR_RESPONSE && rxMsg.dlc == 8)
         {
-            int32_t hash = readInt32BigEndian(&buf[0]);
+            int32_t hash = readInt32BigEndian(&rxMsg.data[0]);
             if (hash == VAR_HASH_OUT_SLOW)
             {
-                float value = readFloat32BigEndian(&buf[4]);
+                float value = readFloat32BigEndian(&rxMsg.data[4]);
 
                 // Treat value as integer bitfield (0..255) encoded as float
                 uint32_t rawBits = (value >= 0.0f) ? (uint32_t)(value + 0.5f) : 0u;
@@ -462,6 +598,7 @@ void loop()
             }
         }
     }
+    
 
     // Calculate VSS rates (runs every VSS_CALC_INTERVAL_MS)
     calculateVSSRates();

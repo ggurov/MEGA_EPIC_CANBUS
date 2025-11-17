@@ -12,7 +12,7 @@
 |------|-----------|-----------------------------------------------|----------------------|--------------------------------------------|
 | D0   | RX0       | UART0 RX (spare GPIO)                         |                      | Not used by firmware                       |
 | D1   | TX0       | UART0 TX (spare GPIO)                         |                      | Not used by firmware                       |
-| D2   |           | PWM `MEGA_EPIC_1_PWM_T3_D2`                   | Timer3               | Planned PWM output                         |
+| D2   |           | MCP2515 INT (CAN interrupt)                   | INT4                 | Interrupt-driven CAN RX                    |
 | D3   |           | PWM `MEGA_EPIC_1_PWM_T3_D3`                   | Timer3               | Planned PWM output                         |
 | D4   |           | PWM-capable (Timer0)                          | Timer0               | ~1 kHz; avoid reconfiguring (Arduino time) |
 | D5   |           | PWM `MEGA_EPIC_1_PWM_T3_D5`                   | Timer3               | Planned PWM output                         |
@@ -100,6 +100,6 @@
 - **VSS inputs:** D18–D21 (external interrupts, pullups enabled, falling edge)  
 - **Digital inputs:** D22–D37 (16-bit packed, INPUT_PULLUP, inverted logic)  
 - **Analog inputs:** A0–A15  
-- **PWM outputs (planned):** D2, D3, D5, D6, D7, D8, D11, D12, D44, D45, D46  
+- **PWM outputs (planned):** D3, D5, D6, D7, D8, D11, D12, D44, D45, D46 (D2 used for CAN INT)  
 - **Low-speed outputs (planned):** D39, D40, D41, D42, D43, D47, D48, D49  
 - **Spare GPIO/PWM:** D0, D1, D10, D14–D17, D38 (subject to peripheral use)  
