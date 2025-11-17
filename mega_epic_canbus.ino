@@ -18,8 +18,8 @@
 
 MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 
-
-#define SLOW_OUT_REQUEST_INTERVAL_MS 50
+// this is periodic request from us, ECU will broadcast on what we're listening for on state change
+#define SLOW_OUT_REQUEST_INTERVAL_MS 250
 
 // ECU and EPIC CAN configuration
 #define ECU_CAN_ID  1
@@ -76,7 +76,7 @@ const int32_t VAR_HASH_OUT_SLOW = 1430780106;
 #define VSS_FRONT_RIGHT_PIN  19  // INT2
 #define VSS_REAR_LEFT_PIN    20  // INT1
 #define VSS_REAR_RIGHT_PIN   21  // INT0
-#define VSS_CALC_INTERVAL_MS 200 // Rate calculation interval
+#define VSS_CALC_INTERVAL_MS 25 // Rate calculation interval
 #define VSS_ENABLE_PULLUP    1   // Internal pullups enabled to prevent interrupt storms when pins are floating
 
 // VSS variable hashes (from vss_pickup.txt)
@@ -285,6 +285,7 @@ void transmitIfNeeded(TxChannelState* state, int32_t varHash, float value, unsig
         if (state->state == TX_STATE_CHANGED) {
             state->state = TX_STATE_STABLE;
         }
+//        delayMicroseconds(200);
     }
 }
 
@@ -505,12 +506,11 @@ void loop()
     for (uint8_t i = 0; i < 16; ++i) {
         transmitIfNeeded(&analogTxState[i], VAR_HASH_ANALOG[i], 
                         currentAnalogValues[i], nowMs);
-        delayMicroseconds(200);
+        
     }
     
     transmitIfNeeded(&digitalTxState, VAR_HASH_D22_D37, 
                     (float)currentDigitalBits, nowMs);
-    delayMicroseconds(200);
     
     const int32_t vssHashes[4] = {
         VAR_HASH_VSS_FRONT_LEFT,
@@ -522,7 +522,6 @@ void loop()
     for (uint8_t i = 0; i < 4; ++i) {
         transmitIfNeeded(&vssTxState[i], vssHashes[i], 
                         currentVssValues[i], nowMs);
-        delayMicroseconds(200);
     }
 }
 
