@@ -1,0 +1,24 @@
+I've modified the ECU code to output the rest of the digital output pins as slow PWM pins, as that's one of the functionalities.
+
+Modify the existing code to update states for the digital output pins, slow and pwm-capable ones. State will come from the same variable as digital output pins.
+it is now uint32_t on the ECU side and is put together as below:
+
+
+		engine->outputChannels.MEGA_EPIC_1_OUT_SLOW = (engine->outputChannels.MEGA_EPIC_1_SLOW_D39 << 0) |
+		                                              (engine->outputChannels.MEGA_EPIC_1_SLOW_D40 << 1) |
+		                                              (engine->outputChannels.MEGA_EPIC_1_SLOW_D41 << 2) |
+		                                              (engine->outputChannels.MEGA_EPIC_1_SLOW_D42 << 3) |
+		                                              (engine->outputChannels.MEGA_EPIC_1_SLOW_D43 << 4) |
+			                                          (engine->outputChannels.MEGA_EPIC_1_SLOW_D47 << 5) |
+			                                          (engine->outputChannels.MEGA_EPIC_1_SLOW_D48 << 6) |
+			                                          (engine->outputChannels.MEGA_EPIC_1_SLOW_D49 << 7) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T3_D3 << 8) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T3_D5 << 9) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T4_D6 << 10) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T4_D7 << 11) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T4_D8 << 12) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T1_D11 << 13) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T1_D12 << 14) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T5_D44 << 15) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T5_D45 << 16) |
+													  (engine->outputChannels.MEGA_EPIC_1_PWM_T5_D46 << 17);

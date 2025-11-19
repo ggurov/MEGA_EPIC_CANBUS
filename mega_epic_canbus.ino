@@ -72,7 +72,9 @@ const int32_t VAR_HASH_ANALOG[16] = {
 // EPIC variable hash for packed digital inputs D22-D37 bitfield (16 bits)
 const int32_t VAR_HASH_D22_D37 = 2138825443;
 
-// EPIC variable hash for slow GPIO outputs bitfield (D39–D43, D47–D49)
+// EPIC variable hash for slow GPIO and PWM outputs bitfield
+// Bits 0-7: Slow GPIO (D39–D43, D47–D49)
+// Bits 8-17: PWM outputs (D3, D5, D6, D7, D8, D11, D12, D44, D45, D46)
 const int32_t VAR_HASH_OUT_SLOW = 1430780106;
 
 // VSS (Vehicle Speed Sensor) configuration
@@ -133,6 +135,11 @@ static float currentVssValues[4] = {0};
 
 // Slow GPIO output pins (bit0..bit7 → D39, D40, D41, D42, D43, D47, D48, D49)
 const uint8_t SLOW_GPIO_PINS[8] = {39, 40, 41, 42, 43, 47, 48, 49};
+
+// PWM output pins (bit8..bit17 → D3, D5, D6, D7, D8, D11, D12, D44, D45, D46)
+// Order matches ECU bit packing: bit8=D3, bit9=D5, bit10=D6, bit11=D7, bit12=D8,
+// bit13=D11, bit14=D12, bit15=D44, bit16=D45, bit17=D46
+const uint8_t PWM_OUTPUT_PINS[10] = {3, 5, 6, 7, 8, 11, 12, 44, 45, 46};
 
 // ---------------- Internal helpers ----------------
 static inline void writeInt32BigEndian(int32_t value, unsigned char* out)
@@ -512,6 +519,13 @@ void setup()
         pinMode(SLOW_GPIO_PINS[i], OUTPUT);
         digitalWrite(SLOW_GPIO_PINS[i], LOW);
     }
+    
+    // Configure PWM output pins
+    for (uint8_t i = 0; i < 10; ++i)
+    {
+        pinMode(PWM_OUTPUT_PINS[i], OUTPUT);
+        analogWrite(PWM_OUTPUT_PINS[i], 0);  // Start with 0% duty cycle
+    }
 
     // Disable I2C (TWEN bit in TWCR) to free D20/D21 for VSS interrupts
     // This prevents conflicts with I2C hardware
@@ -573,7 +587,7 @@ void loop()
     {
         frameCount++;
 
-        // Handle variable response frames for slow GPIO outputs
+        // Handle variable response frames for slow GPIO and PWM outputs
         if (rxMsg.sid == CAN_ID_VAR_RESPONSE && rxMsg.dlc == 8)
         {
             int32_t hash = readInt32BigEndian(&rxMsg.data[0]);
@@ -581,18 +595,33 @@ void loop()
             {
                 float value = readFloat32BigEndian(&rxMsg.data[4]);
 
-                // Treat value as integer bitfield (0..255) encoded as float
+                // Treat value as uint32_t bitfield (18 bits: 0-7 slow GPIO, 8-17 PWM)
+                // ECU packs: bits 0-7 = slow GPIO, bits 8-17 = PWM outputs
                 uint32_t rawBits = (value >= 0.0f) ? (uint32_t)(value + 0.5f) : 0u;
-                uint8_t bits = (uint8_t)(rawBits & 0xFFu);
-
-                // Map bits to slow GPIO pins (bit0 → D39 ... bit7 → D49)
+                
+                // Extract slow GPIO bits (0-7) and set digital outputs
+                uint8_t slowBits = (uint8_t)(rawBits & 0xFFu);
                 for (uint8_t i = 0; i < 8; ++i)
                 {
                     uint8_t pin = SLOW_GPIO_PINS[i];
-                    if (bits & (1u << i)) {
+                    if (slowBits & (1u << i)) {
                         digitalWrite(pin, HIGH);
                     } else {
                         digitalWrite(pin, LOW);
+                    }
+                }
+                
+                // Extract PWM bits (8-17) and set PWM duty cycles
+                // Each PWM bit represents on/off state (0 = 0%, 1 = 100% duty cycle)
+                // Note: Future enhancement could use full 8-bit PWM values if ECU provides them
+                for (uint8_t i = 0; i < 10; ++i)
+                {
+                    uint8_t pin = PWM_OUTPUT_PINS[i];
+                    uint8_t bitIndex = i + 8;  // Bits 8-17
+                    if (rawBits & (1u << bitIndex)) {
+                        analogWrite(pin, 255);  // 100% duty cycle (ON)
+                    } else {
+                        analogWrite(pin, 0);    // 0% duty cycle (OFF)
                     }
                 }
             }
