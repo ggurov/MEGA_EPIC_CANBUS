@@ -12,8 +12,11 @@
 
 #include <SPI.h>
 #include <stdint.h>
+#include <math.h>
 #include <PWFusion_MCP2515.h>
 #include <PWFusion_MCP2515_Registers.h>
+#include <string.h>
+#include "nmea_parser.h"
 
 // Please modify SPI_CS_PIN to adapt to your board (see table below)
 #define SPI_CS_PIN  9 
@@ -77,6 +80,16 @@ const int32_t VAR_HASH_D22_D37 = 2138825443;
 // Bits 8-17: PWM outputs (D3, D5, D6, D7, D8, D11, D12, D44, D45, D46)
 const int32_t VAR_HASH_OUT_SLOW = 1430780106;
 
+// GPS variable hashes
+const int32_t VAR_HASH_GPS_HMSD_PACKED = 703958849;      // Hours, minutes, seconds, days (packed)
+const int32_t VAR_HASH_GPS_MYQSAT_PACKED = -1519914092; // Months, years, quality, satellites (packed)
+const int32_t VAR_HASH_GPS_ACCURACY = -1489698215;
+const int32_t VAR_HASH_GPS_ALTITUDE = -2100224086;
+const int32_t VAR_HASH_GPS_COURSE = 1842893663;
+const int32_t VAR_HASH_GPS_LATITUDE = 1524934922;
+const int32_t VAR_HASH_GPS_LONGITUDE = -809214087;
+const int32_t VAR_HASH_GPS_SPEED = -1486968225;
+
 // VSS (Vehicle Speed Sensor) configuration
 // Wheel-to-pin mapping:
 // - FrontLeft  -> D18 (INT3)
@@ -132,6 +145,20 @@ TxChannelState vssTxState[4];
 static float currentAnalogValues[16] = {0};
 static uint16_t currentDigitalBits = 0;
 static float currentVssValues[4] = {0};
+
+// GPS configuration and state
+#define GPS_SERIAL Serial2
+#define GPS_BAUD_RATE 9600  // Must match GPS module baud rate
+bool gpsEnabled = false;
+bool gpsInitialized = false;
+
+// GPS data structure (stored locally, sent when changed)
+static GPSData gpsData = {0};
+static GPSData lastTransmittedGpsData = {0};
+
+// GPS transmission state (smart TX for each GPS variable)
+// Index: 0=packed_hmsd, 1=packed_myqsat, 2=accuracy, 3=altitude, 4=course, 5=latitude, 6=longitude, 7=speed
+TxChannelState gpsTxState[8];
 
 // Slow GPIO output pins (bit0..bit7 → D39, D40, D41, D42, D43, D47, D48, D49)
 const uint8_t SLOW_GPIO_PINS[8] = {39, 40, 41, 42, 43, 47, 48, 49};
@@ -194,6 +221,22 @@ static inline void sendVariableSetFrame(int32_t varHash, float value)
     // Write hash and value to data array (big-endian)
     writeInt32BigEndian(varHash, &txMsg.data[0]);
     writeFloat32BigEndian(value, &txMsg.data[4]);
+    
+    // Send message
+    CAN.send(&txMsg);
+}
+
+static inline void sendVariableSetFrameU32(int32_t varHash, uint32_t value)
+{
+    // Prepare message structure
+    txMsg.sid = CAN_ID_VARIABLE_SET;
+    txMsg.extended = 0;  // Standard 11-bit ID
+    txMsg.rtr = 0;       // Data frame
+    txMsg.dlc = 8;       // 8 bytes: 4-byte hash + 4-byte float
+    
+    // Write hash and value to data array (big-endian)
+    writeInt32BigEndian(varHash, &txMsg.data[0]);
+    writeInt32BigEndian(value, &txMsg.data[4]);
     
     // Send message
     CAN.send(&txMsg);
@@ -437,6 +480,259 @@ void transmitIfNeeded(TxChannelState* state, int32_t varHash, float value, unsig
     }
 }
 
+// ---------------- GPS Functions - NMEA Parsing ----------------
+
+// Pack GPS HMSD (hours, minutes, seconds, days) into 4 bytes, 1 byte per variable
+// ECU expects: hours, minutes, seconds, days - each 1 byte (0-255)
+// Returns packed as float (for legacy CAN variable sending - reinterpret as uint32_t on receive)
+static inline uint32_t packGPSHMSD(uint8_t hours, uint8_t minutes, uint8_t seconds, uint8_t days) {
+
+
+
+
+    uint32_t packed = ((uint32_t)hours) |
+                      ((uint32_t)minutes << 8) |
+                      ((uint32_t)seconds << 16) |
+                      ((uint32_t)days << 24);
+    return (uint32_t)packed;
+}
+
+// Pack GPS MYQSAT (months, years, quality, satellites) into 4 bytes, 1 byte per variable
+// ECU expects: months, years (from GPS, 1 byte), quality, satellites - each 1 byte (0-255)
+// Returns packed as float (for legacy CAN variable sending - reinterpret as uint32_t on receive)
+static inline uint32_t packGPSMYQSAT(uint8_t months, uint8_t years, uint8_t quality, uint8_t satellites) {
+    uint32_t packed = ((uint32_t)months) |
+                      ((uint32_t)years << 8) |
+                      ((uint32_t)quality << 16) |
+                      ((uint32_t)satellites << 24);
+    return (uint32_t)packed;
+}
+
+// Read and parse NMEA sentences from Serial2
+// Returns true if a valid sentence was parsed, false otherwise
+static bool readGPSData() {
+    static unsigned long lastDebugMs = 0;
+    static unsigned long lastDataMs = 0;
+    unsigned long nowMs = millis();
+    bool dataReceived = false;
+    
+    // Read characters from Serial2 and feed to NMEA parser
+    while (GPS_SERIAL.available() > 0) {
+        char c = GPS_SERIAL.read();
+        lastDataMs = nowMs;  // Track when we last received data
+        
+        // Process character through NMEA parser
+        if (nmeaParserProcessChar(c, &gpsData)) {
+            // Valid sentence was parsed
+            dataReceived = true;
+            
+            if (!gpsEnabled) {
+                gpsEnabled = true;
+                Serial.println("[GPS] GPS enabled!");
+            }
+            
+            // Debug output (less frequent)
+            static unsigned long lastPrintMs = 0;
+            if (nowMs - lastPrintMs >= 1000) {  // Print every 1 second
+                lastPrintMs = nowMs;
+                Serial.print("[GPS] Time: ");
+                Serial.print(gpsData.hours);
+                Serial.print(":");
+                if (gpsData.minutes < 10) Serial.print("0");
+                Serial.print(gpsData.minutes);
+                Serial.print(":");
+                if (gpsData.seconds < 10) Serial.print("0");
+                Serial.print(gpsData.seconds);
+                Serial.print(", Date: ");
+                Serial.print(gpsData.days);
+                Serial.print("/");
+                Serial.print(gpsData.months);
+                Serial.print("/");
+                if (gpsData.years < 10) Serial.print("0");
+                Serial.print(gpsData.years);
+                Serial.print(", Fix: ");
+                Serial.print(gpsData.hasFix ? "YES" : "NO");
+                Serial.print(", Quality: ");
+                Serial.print(gpsData.quality);
+                Serial.print(", Sats: ");
+                Serial.print(gpsData.satellites);
+                if (gpsData.hasFix) {
+                    Serial.print(", Lat: ");
+                    Serial.print(gpsData.latitude, 6);
+                    Serial.print(", Lon: ");
+                    Serial.print(gpsData.longitude, 6);
+                }
+                Serial.println();
+            }
+        }
+    }
+    
+    // Debug: Check GPS status periodically
+    if (nowMs - lastDebugMs >= 5000) {  // Every 5 seconds
+        lastDebugMs = nowMs;
+        unsigned long timeSinceData = nowMs - lastDataMs;
+        Serial.print("[GPS] Status - Enabled: ");
+        Serial.print(gpsEnabled ? "YES" : "NO");
+        Serial.print(", Has fix: ");
+        Serial.print(gpsData.hasFix ? "YES" : "NO");
+        Serial.print(", Time since data: ");
+        Serial.print(timeSinceData);
+        Serial.println("ms");
+        
+        // If no data for 10 seconds, mark GPS as potentially disconnected
+        if (gpsEnabled && timeSinceData > 10000) {
+            // GPS might be disconnected, but don't disable it (allows recovery)
+        }
+    }
+    
+    return dataReceived;
+}
+
+// Check if GPS data changed (for smart transmission)
+// Uses floating-point comparison with small threshold for float values
+static bool hasGPSChanged(uint8_t gpsVarIndex) {
+    const float GPS_FLOAT_THRESHOLD = 0.001f;  // Small threshold for float comparison
+    
+    switch (gpsVarIndex) {
+        case 0: {  // packed_hmsd
+            float current = packGPSHMSD(gpsData.hours, gpsData.minutes, gpsData.seconds, gpsData.days);
+            float last = packGPSHMSD(lastTransmittedGpsData.hours, lastTransmittedGpsData.minutes, 
+                                     lastTransmittedGpsData.seconds, lastTransmittedGpsData.days);
+            return (current != last);  // Integer comparison is exact
+        }
+        case 1: {  // packed_myqsat
+            float current = packGPSMYQSAT(gpsData.months, gpsData.years, gpsData.quality, gpsData.satellites);
+            float last = packGPSMYQSAT(lastTransmittedGpsData.months, lastTransmittedGpsData.years,
+                                       lastTransmittedGpsData.quality, lastTransmittedGpsData.satellites);
+            return (current != last);  // Integer comparison is exact
+        }
+        case 2:  // accuracy
+            return (fabs(gpsData.accuracy - lastTransmittedGpsData.accuracy) > GPS_FLOAT_THRESHOLD);
+        case 3:  // altitude
+            return (fabs(gpsData.altitude - lastTransmittedGpsData.altitude) > GPS_FLOAT_THRESHOLD);
+        case 4:  // course
+            return (fabs(gpsData.course - lastTransmittedGpsData.course) > GPS_FLOAT_THRESHOLD);
+        case 5:  // latitude
+            return (fabs(gpsData.latitude - lastTransmittedGpsData.latitude) > GPS_FLOAT_THRESHOLD);
+        case 6:  // longitude
+            return (fabs(gpsData.longitude - lastTransmittedGpsData.longitude) > GPS_FLOAT_THRESHOLD);
+        case 7:  // speed
+            return (fabs(gpsData.speed - lastTransmittedGpsData.speed) > GPS_FLOAT_THRESHOLD);
+        default:
+            return false;
+    }
+}
+
+// Transmit GPS data if needed (smart transmission)
+static void transmitGPSIfNeeded() {
+    if (!gpsEnabled || !gpsData.dataValid) {
+        return;  // GPS not available or no valid data yet
+    }
+    
+    unsigned long nowMs = millis();
+    
+    // Check and transmit each GPS variable
+    // Index 0: packed_hmsd
+    bool changed0 = hasGPSChanged(0);
+    updateTxState(&gpsTxState[0], changed0, nowMs);
+    if (shouldTransmit(&gpsTxState[0], nowMs)) {
+        uint32_t value = packGPSHMSD(gpsData.hours, gpsData.minutes, gpsData.seconds, gpsData.days);
+        sendVariableSetFrameU32(VAR_HASH_GPS_HMSD_PACKED, value);
+        gpsTxState[0].lastTransmittedValue = value;
+        gpsTxState[0].lastTxTime = nowMs;
+        lastTransmittedGpsData.hours = gpsData.hours;
+        lastTransmittedGpsData.minutes = gpsData.minutes;
+        lastTransmittedGpsData.seconds = gpsData.seconds;
+        lastTransmittedGpsData.days = gpsData.days;
+    }
+    
+    // Index 1: packed_myqsat
+    bool changed1 = hasGPSChanged(1);
+    updateTxState(&gpsTxState[1], changed1, nowMs);
+    if (shouldTransmit(&gpsTxState[1], nowMs)) {
+        uint32_t value = packGPSMYQSAT(gpsData.months, gpsData.years, gpsData.quality, gpsData.satellites);
+        sendVariableSetFrameU32(VAR_HASH_GPS_MYQSAT_PACKED, value);
+        gpsTxState[1].lastTransmittedValue = value;
+        gpsTxState[1].lastTxTime = nowMs;
+        lastTransmittedGpsData.months = gpsData.months;
+        lastTransmittedGpsData.years = gpsData.years;
+        lastTransmittedGpsData.quality = gpsData.quality;
+        lastTransmittedGpsData.satellites = gpsData.satellites;
+    }
+    
+    // Index 2: accuracy (only if has fix)
+    if (gpsData.hasFix) {
+        bool changed2 = hasGPSChanged(2);
+        updateTxState(&gpsTxState[2], changed2, nowMs);
+        if (shouldTransmit(&gpsTxState[2], nowMs)) {
+            sendVariableSetFrame(VAR_HASH_GPS_ACCURACY, gpsData.accuracy);
+            gpsTxState[2].lastTransmittedValue = gpsData.accuracy;
+            gpsTxState[2].lastTxTime = nowMs;
+            lastTransmittedGpsData.accuracy = gpsData.accuracy;
+        }
+    }
+    
+    // Index 3: altitude (only if has fix)
+    if (gpsData.hasFix) {
+        bool changed3 = hasGPSChanged(3);
+        updateTxState(&gpsTxState[3], changed3, nowMs);
+        if (shouldTransmit(&gpsTxState[3], nowMs)) {
+            sendVariableSetFrame(VAR_HASH_GPS_ALTITUDE, gpsData.altitude);
+            gpsTxState[3].lastTransmittedValue = gpsData.altitude;
+            gpsTxState[3].lastTxTime = nowMs;
+            lastTransmittedGpsData.altitude = gpsData.altitude;
+        }
+    }
+    
+    // Index 4: course (only if has fix)
+    if (gpsData.hasFix) {
+        bool changed4 = hasGPSChanged(4);
+        updateTxState(&gpsTxState[4], changed4, nowMs);
+        if (shouldTransmit(&gpsTxState[4], nowMs)) {
+            sendVariableSetFrame(VAR_HASH_GPS_COURSE, gpsData.course);
+            gpsTxState[4].lastTransmittedValue = gpsData.course;
+            gpsTxState[4].lastTxTime = nowMs;
+            lastTransmittedGpsData.course = gpsData.course;
+        }
+    }
+    
+    // Index 5: latitude (only if has fix)
+    if (gpsData.hasFix) {
+        bool changed5 = hasGPSChanged(5);
+        updateTxState(&gpsTxState[5], changed5, nowMs);
+        if (shouldTransmit(&gpsTxState[5], nowMs)) {
+            sendVariableSetFrame(VAR_HASH_GPS_LATITUDE, gpsData.latitude);
+            gpsTxState[5].lastTransmittedValue = gpsData.latitude;
+            gpsTxState[5].lastTxTime = nowMs;
+            lastTransmittedGpsData.latitude = gpsData.latitude;
+        }
+    }
+    
+    // Index 6: longitude (only if has fix)
+    if (gpsData.hasFix) {
+        bool changed6 = hasGPSChanged(6);
+        updateTxState(&gpsTxState[6], changed6, nowMs);
+        if (shouldTransmit(&gpsTxState[6], nowMs)) {
+            sendVariableSetFrame(VAR_HASH_GPS_LONGITUDE, gpsData.longitude);
+            gpsTxState[6].lastTransmittedValue = gpsData.longitude;
+            gpsTxState[6].lastTxTime = nowMs;
+            lastTransmittedGpsData.longitude = gpsData.longitude;
+        }
+    }
+    
+    // Index 7: speed (only if has fix)
+    if (gpsData.hasFix) {
+        bool changed7 = hasGPSChanged(7);
+        updateTxState(&gpsTxState[7], changed7, nowMs);
+        if (shouldTransmit(&gpsTxState[7], nowMs)) {
+            sendVariableSetFrame(VAR_HASH_GPS_SPEED, gpsData.speed);
+            gpsTxState[7].lastTransmittedValue = gpsData.speed;
+            gpsTxState[7].lastTxTime = nowMs;
+            lastTransmittedGpsData.speed = gpsData.speed;
+        }
+    }
+}
+
 // ---------------- VSS Rate Calculation ----------------
 void calculateVSSRates() {
     static unsigned long lastCalcTime = 0;
@@ -492,6 +788,19 @@ void setup()
     // }
     Serial.println("CAN BUS OK!");
     delay(10);
+
+    // Initialize GPS (optional - will not block if GPS fails)
+    // Note: GPS must be initialized at 9600 baud to match GPS module configuration
+    GPS_SERIAL.begin(GPS_BAUD_RATE);
+    delay(200);  // Give GPS module time to initialize (longer delay for stability)
+    gpsInitialized = true;  // Assume initialized, will be set to false if GPS doesn't respond
+    gpsEnabled = false;     // Will be enabled when first valid data is received
+    
+    // Initialize NMEA parser
+    nmeaParserInit();
+    
+    // Note: GPS module will automatically send NMEA sentences
+    // We don't need to send commands - just parse what comes in
     
     // Configure MCP2515 hardware filters to accept only CAN_ID_VAR_RESPONSE (0x721)
     // This reduces CPU overhead by filtering unwanted messages at hardware level
@@ -572,6 +881,16 @@ void setup()
         vssTxState[i].hasChanged = true;  // Force initial transmission
         vssTxState[i].state = TX_STATE_CHANGED;
     }
+    
+    // Initialize GPS transmission state
+    for (uint8_t i = 0; i < 8; ++i) {
+        gpsTxState[i].lastTransmittedValue = 0.0f;
+        gpsTxState[i].lastTxTime = 0;
+        gpsTxState[i].hasChanged = true;  // Force initial transmission
+        gpsTxState[i].state = TX_STATE_CHANGED;
+    }
+
+    
 }
 
 
@@ -643,6 +962,10 @@ void loop()
         sendVariableRequestFrame(VAR_HASH_OUT_SLOW);
     }
     
+    // Read GPS data (runs independently at GPS_READ_INTERVAL_MS)
+    // GPS is optional - if GPS fails, normal operation continues
+    readGPSData();
+    
     // Read inputs at fixed interval (independent of transmission)
     static unsigned long lastReadMs = 0;
     if (nowMs - lastReadMs >= TX_READ_INTERVAL_MS) {
@@ -689,6 +1012,9 @@ void loop()
         transmitIfNeeded(&vssTxState[i], vssHashes[i], 
                         currentVssValues[i], nowMs);
     }
+    
+    // Transmit GPS data if needed (smart transmission, only on change)
+    transmitGPSIfNeeded();
 }
 
 // END FILE

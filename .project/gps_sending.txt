@@ -1,0 +1,112 @@
+There is now a GPS module connected to mega2560, it's on TX2/RX2
+There is working test code in gps_demo_code.cpp with example output at the top of the file. 
+we need to send the GPS data to the ECU via CAN bus
+ECU has the following varaibles allocated:
+
+These variables: 
+{
+    "name": "gps_hours",
+    "hash": -1500031425,
+    "source": "output"
+  },
+  
+  {
+    "name": "gps_minutes",
+    "hash": 472721747,
+    "source": "output"
+  },
+
+   {
+    "name": "gps_seconds",
+    "hash": -538213923,
+    "source": "output"
+  },
+
+
+{
+    "name": "gps_days",
+    "hash": 1255890879,
+    "source": "output"
+  },
+  
+Are packed into gps_hmsd_packed:
+
+  {
+    "name": "gps_hmsd_packed",
+    "hash": 703958849,
+    "source": "output"
+  },
+
+
+
+And these variables: 
+
+
+  {
+    "name": "gps_months",
+    "hash": -2060969433,
+    "source": "output"
+  },
+  {
+    "name": "gps_years",
+    "hash": -1480251918,
+    "source": "output"
+  },
+
+  {
+    "name": "gps_quality",
+    "hash": 1797499159,
+    "source": "output"
+  },
+  {
+    "name": "gps_satellites",
+    "hash": 2076901896,
+    "source": "output"
+  },
+
+Are packed into gps_myqsat_packed:
+
+  {
+    "name": "gps_myqsat_packed",
+    "hash": -1519914092,
+    "source": "output"
+  },
+
+
+These are sent as floats, separately, as usual.
+
+  {
+    "name": "gps_accuracy",
+    "hash": -1489698215,
+    "source": "output"
+  },
+  {
+    "name": "gps_altitude",
+    "hash": -2100224086,
+    "source": "output"
+  },
+  {
+    "name": "gps_course",
+    "hash": 1842893663,
+    "source": "output"
+  },
+  {
+    "name": "gps_latitude",
+    "hash": 1524934922,
+    "source": "output"
+  },
+  {
+    "name": "gps_longitude",
+    "hash": -809214087,
+    "source": "output"
+  },
+
+  {
+    "name": "gps_speed",
+    "hash": -1486968225,
+    "source": "output"
+  },
+
+
+Implement reading the gps, storing the variables that gps sends locally, and only sending the floats and packed variables when they change. Ecu will handle floats as usual
+and unpack the packed variables, to limit how many packets are sent. GPS should be optional, and should not prevent normal operations of the MEGA_EPIC_CANBUS board.
