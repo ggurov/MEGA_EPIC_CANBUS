@@ -27,8 +27,7 @@ MCP2515 CAN;
 // MCP2515 interrupt pin (D2, INT4 on Mega2560)
 #define MCP2515_INT_PIN  2
 
-// this is periodic request from us, ECU will broadcast on what we're listening for on state change
-#define SLOW_OUT_REQUEST_INTERVAL_MS 50
+
 
 // Note: CAN interrupt handling is managed by Playing With Fusion library internally
 // No need for manual interrupt flag - library queues messages and CAN.receive() checks the queue
@@ -41,10 +40,14 @@ MCP2515 CAN;
 #define CAN_ID_FUNCTION_RESPONSE  (0x760 + ECU_CAN_ID)
 #define CAN_ID_VARIABLE_SET       (0x780 + ECU_CAN_ID)
 
+
+// Timing parameters
+// this is periodic request from us, ECU will broadcast on what we're listening for on state change
+#define SLOW_OUT_REQUEST_INTERVAL_MS 25
 // Smart transmission configuration
 #define TX_INTERVAL_FAST_MS    25   // Fast transmission for changed values
 #define TX_INTERVAL_SLOW_MS    500  // Slow transmission for stable values (heartbeat)
-#define TX_READ_INTERVAL_MS    25   // Input reading interval (independent of transmission)
+#define TX_READ_INTERVAL_MS    10   // Input reading interval (independent of transmission)
 
 // Change detection thresholds
 #define TX_ANALOG_THRESHOLD    2.0f    // ADC counts (avoid noise)
@@ -148,7 +151,12 @@ static float currentVssValues[4] = {0};
 
 // GPS configuration and state
 #define GPS_SERIAL Serial2
-#define GPS_BAUD_RATE 9600  // Must match GPS module baud rate
+// #define GPS_BAUD_RATE 9600  // some GPS may need this
+#define GPS_BAUD_RATE 115200  // This is for the faster ones
+#define GPS_UPDATE_RATE_HZ 20  // GPS update rate in Hz (NEO-6M max is 5 Hz, not 20 Hz)
+// Note: NEO-6M module maximum is 5 Hz. For 5 Hz, consider increasing baud rate to 38400
+// Set GPS_BAUD_RATE_HIGH_SPEED to 1 to use 38400 baud for 5 Hz operation
+#define GPS_BAUD_RATE_HIGH_SPEED 0  // Set to 1 to use 38400 baud (required for 5 Hz)
 bool gpsEnabled = false;
 bool gpsInitialized = false;
 
@@ -480,6 +488,68 @@ void transmitIfNeeded(TxChannelState* state, int32_t varHash, float value, unsig
     }
 }
 
+// ---------------- GPS Functions - Configuration ----------------
+
+// Calculate NMEA checksum (XOR of all characters between $ and *)
+static inline uint8_t calculateNMEAChecksum(const char* cmd) {
+    if (!cmd || *cmd != '$') return 0;
+    
+    uint8_t checksum = 0;
+    const char* p = cmd + 1;  // Skip $
+    
+    while (*p && *p != '*') {
+        checksum ^= *p;
+        p++;
+    }
+    
+    return checksum;
+}
+
+static void checkPMTKResponse(unsigned long timeoutMs) {
+    unsigned long startTime = millis();
+    char responseBuf[64];
+    uint8_t bufIndex = 0;
+    
+    while (millis() - startTime < timeoutMs) {
+        while (GPS_SERIAL.available() > 0) {
+            char c = GPS_SERIAL.read();
+            
+            if (c == '$') {
+                bufIndex = 0;
+                responseBuf[bufIndex++] = c;
+            } else if (c == '\r' || c == '\n') {
+                if (bufIndex > 0) {
+                    responseBuf[bufIndex] = '\0';
+                    bufIndex = 0;
+                }
+            } else if (bufIndex < sizeof(responseBuf) - 1) {
+                responseBuf[bufIndex++] = c;
+            }
+        }
+        delay(5);  // Small delay to avoid busy-waiting
+    }
+}
+
+static inline void sendPMTKCommand(const char* cmd) {
+    if (!cmd) return;
+    
+    // Calculate checksum on command (without $ prefix)
+    uint8_t checksum = 0;
+    const char* p = cmd;
+    while (*p) {
+        checksum ^= *p;
+        p++;
+    }
+    
+        // Send command with $ prefix, checksum, and CRLF to GPS module
+    GPS_SERIAL.print('$');
+    GPS_SERIAL.print(cmd);
+    GPS_SERIAL.print('*');
+    if (checksum < 16) GPS_SERIAL.print('0');  // Leading zero if needed
+    GPS_SERIAL.print(checksum, HEX);
+    GPS_SERIAL.print("\r\n");
+}
+
 // ---------------- GPS Functions - NMEA Parsing ----------------
 
 // Pack GPS HMSD (hours, minutes, seconds, days) into 4 bytes, 1 byte per variable
@@ -526,64 +596,13 @@ static bool readGPSData() {
             // Valid sentence was parsed
             dataReceived = true;
             
-            if (!gpsEnabled) {
-                gpsEnabled = true;
-                Serial.println("[GPS] GPS enabled!");
-            }
-            
-            // Debug output (less frequent)
-            static unsigned long lastPrintMs = 0;
-            if (nowMs - lastPrintMs >= 1000) {  // Print every 1 second
-                lastPrintMs = nowMs;
-                Serial.print("[GPS] Time: ");
-                Serial.print(gpsData.hours);
-                Serial.print(":");
-                if (gpsData.minutes < 10) Serial.print("0");
-                Serial.print(gpsData.minutes);
-                Serial.print(":");
-                if (gpsData.seconds < 10) Serial.print("0");
-                Serial.print(gpsData.seconds);
-                Serial.print(", Date: ");
-                Serial.print(gpsData.days);
-                Serial.print("/");
-                Serial.print(gpsData.months);
-                Serial.print("/");
-                if (gpsData.years < 10) Serial.print("0");
-                Serial.print(gpsData.years);
-                Serial.print(", Fix: ");
-                Serial.print(gpsData.hasFix ? "YES" : "NO");
-                Serial.print(", Quality: ");
-                Serial.print(gpsData.quality);
-                Serial.print(", Sats: ");
-                Serial.print(gpsData.satellites);
-                if (gpsData.hasFix) {
-                    Serial.print(", Lat: ");
-                    Serial.print(gpsData.latitude, 6);
-                    Serial.print(", Lon: ");
-                    Serial.print(gpsData.longitude, 6);
-                }
-                Serial.println();
-            }
+                    if (!gpsEnabled) {
+                        gpsEnabled = true;
+                    }
         }
     }
     
-    // Debug: Check GPS status periodically
-    if (nowMs - lastDebugMs >= 5000) {  // Every 5 seconds
-        lastDebugMs = nowMs;
-        unsigned long timeSinceData = nowMs - lastDataMs;
-        Serial.print("[GPS] Status - Enabled: ");
-        Serial.print(gpsEnabled ? "YES" : "NO");
-        Serial.print(", Has fix: ");
-        Serial.print(gpsData.hasFix ? "YES" : "NO");
-        Serial.print(", Time since data: ");
-        Serial.print(timeSinceData);
-        Serial.println("ms");
-        
-        // If no data for 10 seconds, mark GPS as potentially disconnected
-        if (gpsEnabled && timeSinceData > 10000) {
-            // GPS might be disconnected, but don't disable it (allows recovery)
-        }
-    }
+    // Debug status removed to eliminate Serial output
     
     return dataReceived;
 }
@@ -782,26 +801,17 @@ void setup()
     // Initialize CAN bus: CS pin, INT pin, loopback=false, 500kbps
     // Playing With Fusion library begin() returns true on success
     CAN.begin(SPI_CS_PIN, MCP2515_INT_PIN, false, 500);
-    // {
-    //     Serial.println("CAN BUS FAIL!");
-    //     delay(100);
-    // }
-    Serial.println("CAN BUS OK!");
     delay(10);
 
     // Initialize GPS (optional - will not block if GPS fails)
-    // Note: GPS must be initialized at 9600 baud to match GPS module configuration
-    GPS_SERIAL.begin(GPS_BAUD_RATE);
-    delay(200);  // Give GPS module time to initialize (longer delay for stability)
+       GPS_SERIAL.begin(GPS_BAUD_RATE);
+    delay(200);  // Give GPS module time to initialize 
     gpsInitialized = true;  // Assume initialized, will be set to false if GPS doesn't respond
     gpsEnabled = false;     // Will be enabled when first valid data is received
     
     // Initialize NMEA parser
     nmeaParserInit();
-    
-    // Note: GPS module will automatically send NMEA sentences
-    // We don't need to send commands - just parse what comes in
-    
+        
     // Configure MCP2515 hardware filters to accept only CAN_ID_VAR_RESPONSE (0x721)
     // This reduces CPU overhead by filtering unwanted messages at hardware level
     configureCANFilters();

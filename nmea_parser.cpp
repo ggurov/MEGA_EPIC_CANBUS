@@ -198,66 +198,7 @@ static bool parseGPRMC(const char* sentence, struct GPSData* gpsData) {
     const char* courseStr = nmeaGetField(sentence, 8);  // Field 8: course
     const char* dateStr = nmeaGetField(sentence, 9);  // Field 9: date
     
-    // DEBUG: Print extracted fields (extract up to comma for display)
-    Serial.print("[GPRMC] Fields - time: ");
-    if (timeStr) {
-        const char* end = strchr(timeStr, ',');
-        if (end) {
-            for (const char* p = timeStr; p < end && p < timeStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(timeStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.print(", status: ");
-    if (statusStr) {
-        const char* end = strchr(statusStr, ',');
-        if (end) {
-            for (const char* p = statusStr; p < end && p < statusStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(statusStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.print(", date: ");
-    if (dateStr) {
-        const char* end = strchr(dateStr, ',');
-        if (end) {
-            for (const char* p = dateStr; p < end && p < dateStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(dateStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.print(", lat: ");
-    if (latStr) {
-        const char* end = strchr(latStr, ',');
-        if (end) {
-            for (const char* p = latStr; p < end && p < latStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(latStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.print(", lon: ");
-    if (lonStr) {
-        const char* end = strchr(lonStr, ',');
-        if (end) {
-            for (const char* p = lonStr; p < end && p < lonStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(lonStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.println();
-    
     if (!timeStr || !statusStr || !dateStr) {
-        Serial.println("[GPRMC] Missing required fields!");
         return false;
     }
     
@@ -362,71 +303,23 @@ static bool parseGPRMC(const char* sentence, struct GPSData* gpsData) {
 }
 
 // Parse GPGGA sentence (Global Positioning System Fix Data)
-// Format: $GPGGA,time,lat,N/S,lon,E/W,quality,num_sats,hdop,altitude,M,sep,M,diff_age,diff_station*checksum
+// Standard NMEA-0183 format:
+// $GPGGA,time,lat,N/S,lon,E/W,quality,num_sats,hdop,altitude,M,sep,M,diff_age,diff_station*checksum
 static bool parseGPGGA(const char* sentence, struct GPSData* gpsData) {
     if (!sentence || strncmp(sentence, "$GPGGA", 6) != 0) return false;
     if (!nmeaVerifyChecksum(sentence)) return false;
     
-    const char* latStr = nmeaGetField(sentence, 2);  // Field 2: latitude
-    const char* nsStr = nmeaGetField(sentence, 3);  // Field 3: N/S
-    const char* lonStr = nmeaGetField(sentence, 4);  // Field 4: longitude
-    const char* ewStr = nmeaGetField(sentence, 5);  // Field 5: E/W
-    const char* qualityStr = nmeaGetField(sentence, 6);  // Field 6: quality (0=no fix, 1=GPS, 2=DGPS)
-    const char* numSatsStr = nmeaGetField(sentence, 7);  // Field 7: number of satellites
-    const char* hdopStr = nmeaGetField(sentence, 8);  // Field 8: HDOP (accuracy)
+    const char* latStr = nmeaGetField(sentence, 2);  // Field 2: latitude (DDMM.MMMM)
+    const char* nsStr = nmeaGetField(sentence, 3);   // Field 3: N/S
+    const char* lonStr = nmeaGetField(sentence, 4);  // Field 4: longitude (DDDMM.MMMM)
+    const char* ewStr = nmeaGetField(sentence, 5);   // Field 5: E/W
+    const char* qualityStr = nmeaGetField(sentence, 6);   // Field 6: quality (0=no fix, 1=GPS, 2=DGPS, ...)
+    const char* numSatsStr = nmeaGetField(sentence, 7);   // Field 7: number of satellites
+    const char* hdopStr = nmeaGetField(sentence, 8);      // Field 8: HDOP (accuracy)
     const char* altitudeStr = nmeaGetField(sentence, 9);  // Field 9: altitude
     
-    // DEBUG: Print extracted fields (extract up to comma for display)
-    Serial.print("[GPGGA] Fields - quality: ");
-    if (qualityStr) {
-        const char* end = strchr(qualityStr, ',');
-        if (end) {
-            for (const char* p = qualityStr; p < end && p < qualityStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(qualityStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.print(", sats: ");
-    if (numSatsStr) {
-        const char* end = strchr(numSatsStr, ',');
-        if (end) {
-            for (const char* p = numSatsStr; p < end && p < numSatsStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(numSatsStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.print(", lat: ");
-    if (latStr) {
-        const char* end = strchr(latStr, ',');
-        if (end) {
-            for (const char* p = latStr; p < end && p < latStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(latStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.print(", lon: ");
-    if (lonStr) {
-        const char* end = strchr(lonStr, ',');
-        if (end) {
-            for (const char* p = lonStr; p < end && p < lonStr + 20; p++) Serial.print(*p);
-        } else {
-            Serial.print(lonStr);
-        }
-    } else {
-        Serial.print("(NULL)");
-    }
-    Serial.println();
-    
-    if (!qualityStr) {
-        Serial.println("[GPGGA] Missing quality field!");
-        return false;
-    }
+    // Quality field is required
+    if (!qualityStr) return false;
     
     // Extract quality field (stop at comma)
     char qualityBuf[4] = {0};
@@ -458,74 +351,73 @@ static bool parseGPGGA(const char* sentence, struct GPSData* gpsData) {
         gpsData->satellites = (uint8_t)atoi(satsBuf);
     }
     
-    // Quality > 0 means we have a fix
-    if (gpsData->quality > 0) {
-        gpsData->hasFix = true;
+    // Quality > 0 means we have some kind of fix
+    gpsData->hasFix = (gpsData->quality > 0);
+    
+    // Parse position if we have a fix and valid fields
+    if (gpsData->hasFix && latStr && nsStr && lonStr && ewStr &&
+        (*nsStr == 'N' || *nsStr == 'S' || *nsStr == 'n' || *nsStr == 's') &&
+        (*ewStr == 'E' || *ewStr == 'W' || *ewStr == 'e' || *ewStr == 'w')) {
         
-        // Parse position if available
-        if (latStr && nsStr && lonStr && ewStr) {
-            // Extract latitude field (stop at comma)
-            char latBuf[16] = {0};
-            const char* latEnd = strchr(latStr, ',');
-            if (latEnd) {
-                size_t len = latEnd - latStr;
-                if (len > 15) len = 15;
-                strncpy(latBuf, latStr, len);
-                latBuf[len] = '\0';
-            } else {
-                strncpy(latBuf, latStr, 15);
-                latBuf[15] = '\0';
-            }
-            gpsData->latitude = parseLatitudeFromNMEA(latBuf, *nsStr);
-            
-            // Extract longitude field (stop at comma)
-            char lonBuf[16] = {0};
-            const char* lonEnd = strchr(lonStr, ',');
-            if (lonEnd) {
-                size_t len = lonEnd - lonStr;
-                if (len > 15) len = 15;
-                strncpy(lonBuf, lonStr, len);
-                lonBuf[len] = '\0';
-            } else {
-                strncpy(lonBuf, lonStr, 15);
-                lonBuf[15] = '\0';
-            }
-            gpsData->longitude = parseLongitudeFromNMEA(lonBuf, *ewStr);
+        // Latitude in DDMM.MMMM format
+        char latBuf[16] = {0};
+        const char* latEnd = strchr(latStr, ',');
+        if (latEnd) {
+            size_t len = latEnd - latStr;
+            if (len > 15) len = 15;
+            strncpy(latBuf, latStr, len);
+            latBuf[len] = '\0';
+        } else {
+            strncpy(latBuf, latStr, 15);
+            latBuf[15] = '\0';
         }
+        gpsData->latitude = parseLatitudeFromNMEA(latBuf, *nsStr);
         
-        // Parse altitude
-        if (altitudeStr) {
-            char altBuf[16] = {0};
-            const char* altEnd = strchr(altitudeStr, ',');
-            if (altEnd) {
-                size_t len = altEnd - altitudeStr;
-                if (len > 15) len = 15;
-                strncpy(altBuf, altitudeStr, len);
-                altBuf[len] = '\0';
-            } else {
-                strncpy(altBuf, altitudeStr, 15);
-                altBuf[15] = '\0';
-            }
-            gpsData->altitude = atof(altBuf);
+        // Longitude in DDDMM.MMMM format
+        char lonBuf[16] = {0};
+        const char* lonEnd = strchr(lonStr, ',');
+        if (lonEnd) {
+            size_t len = lonEnd - lonStr;
+            if (len > 15) len = 15;
+            strncpy(lonBuf, lonStr, len);
+            lonBuf[len] = '\0';
+        } else {
+            strncpy(lonBuf, lonStr, 15);
+            lonBuf[15] = '\0';
         }
-        
-        // Parse HDOP (accuracy) - lower is better
-        if (hdopStr) {
-            char hdopBuf[16] = {0};
-            const char* hdopEnd = strchr(hdopStr, ',');
-            if (hdopEnd) {
-                size_t len = hdopEnd - hdopStr;
-                if (len > 15) len = 15;
-                strncpy(hdopBuf, hdopStr, len);
-                hdopBuf[len] = '\0';
-            } else {
-                strncpy(hdopBuf, hdopStr, 15);
-                hdopBuf[15] = '\0';
-            }
-            gpsData->accuracy = atof(hdopBuf);
+        gpsData->longitude = parseLongitudeFromNMEA(lonBuf, *ewStr);
+    }
+    
+    // Parse altitude (if available and we have a fix)
+    if (gpsData->hasFix && altitudeStr) {
+        char altBuf[16] = {0};
+        const char* altEnd = strchr(altitudeStr, ',');
+        if (altEnd) {
+            size_t len = altEnd - altitudeStr;
+            if (len > 15) len = 15;
+            strncpy(altBuf, altitudeStr, len);
+            altBuf[len] = '\0';
+        } else {
+            strncpy(altBuf, altitudeStr, 15);
+            altBuf[15] = '\0';
         }
-    } else {
-        gpsData->hasFix = false;
+        gpsData->altitude = atof(altBuf);
+    }
+    
+    // Parse HDOP (accuracy) - lower is better
+    if (gpsData->hasFix && hdopStr) {
+        char hdopBuf[16] = {0};
+        const char* hdopEnd = strchr(hdopStr, ',');
+        if (hdopEnd) {
+            size_t len = hdopEnd - hdopStr;
+            if (len > 15) len = 15;
+            strncpy(hdopBuf, hdopStr, len);
+            hdopBuf[len] = '\0';
+        } else {
+            strncpy(hdopBuf, hdopStr, 15);
+            hdopBuf[15] = '\0';
+        }
+        gpsData->accuracy = atof(hdopBuf);
     }
     
     gpsData->dataValid = true;
@@ -546,57 +438,14 @@ bool nmeaParserProcessChar(char c, struct GPSData* gpsData) {
         if (nmeaBufferIndex > 0) {
             nmeaBuffer[nmeaBufferIndex] = '\0';  // Null terminate
             
-            // DEBUG: Print raw NMEA sentence
-            Serial.print("[NMEA] Raw: ");
-            Serial.println(nmeaBuffer);
-            
             // Parse the sentence
             bool parsed = false;
             if (strncmp(nmeaBuffer, "$GPRMC", 6) == 0) {
-                Serial.println("[NMEA] Parsing GPRMC...");
                 parsed = parseGPRMC(nmeaBuffer, gpsData);
-                if (parsed) {
-                    Serial.print("[NMEA] GPRMC parsed OK - Time: ");
-                    Serial.print(gpsData->hours);
-                    Serial.print(":");
-                    Serial.print(gpsData->minutes);
-                    Serial.print(":");
-                    Serial.print(gpsData->seconds);
-                    Serial.print(", Date: ");
-                    Serial.print(gpsData->days);
-                    Serial.print("/");
-                    Serial.print(gpsData->months);
-                    Serial.print("/");
-                    if (gpsData->years < 10) Serial.print("0");
-                    Serial.println(gpsData->years);
-                } else {
-                    Serial.println("[NMEA] GPRMC parse FAILED");
-                }
             } else if (strncmp(nmeaBuffer, "$GPGGA", 6) == 0) {
-                Serial.println("[NMEA] Parsing GPGGA...");
                 parsed = parseGPGGA(nmeaBuffer, gpsData);
-                if (parsed) {
-                    Serial.print("[NMEA] GPGGA parsed OK - Quality: ");
-                    Serial.print(gpsData->quality);
-                    Serial.print(", Sats: ");
-                    Serial.print(gpsData->satellites);
-                    Serial.print(", Lat: ");
-                    Serial.print(gpsData->latitude, 6);
-                    Serial.print(", Lon: ");
-                    Serial.println(gpsData->longitude, 6);
-                } else {
-                    Serial.println("[NMEA] GPGGA parse FAILED");
-                }
             } else {
-                // Other sentence types - just print for reference
-                Serial.print("[NMEA] Ignored sentence type: ");
-                if (nmeaBufferIndex >= 6) {
-                    char type[7] = {0};
-                    strncpy(type, nmeaBuffer, 6);
-                    Serial.println(type);
-                } else {
-                    Serial.println("(too short)");
-                }
+                // Other sentence types are ignored
             }
             
             // Reset buffer
