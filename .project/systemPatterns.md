@@ -80,6 +80,20 @@ variable_map.h             - Variable hash to I/O mappings
 3. **Apply:** `analogWrite()` on D2-D13, D44-D46
    - Convert percentage to 0-255 range
 
+### GPS Data Flow (Mega → ECU)
+1. **Capture:** GPS module (e.g., GT‑U7 / u‑blox7) sends standard NMEA‑0183 sentences (`GPRMC`, `GPGGA`) over Serial2 at a configurable rate (default 20 Hz at 115200 baud for GT‑U7).
+2. **Parse:** `nmea_parser.cpp` maintains a small line buffer, validates NMEA checksums, and parses:
+   - `GPRMC`: time, date, latitude, longitude, speed over ground, course, fix status.
+   - `GPGGA`: fix quality, satellites used, HDOP (accuracy), altitude, and redundant position.
+   - Lat/Lon in DDMM.MMMM / DDDMM.MMMM are converted to signed decimal degrees.
+3. **Stage:** Parsed values are stored in a `GPSData` struct (time/date, position, quality, sats, accuracy, altitude, speed, course, fix flag).
+4. **Smart TX:** The main loop compares current GPS values against last-sent values with small thresholds and:
+   - Packs time/date into 2× `uint32_t` words (HMSD + MYQSAT).
+   - Sends HMSD/MYQSAT plus individual float variables (lat, lon, speed, course, altitude, accuracy) as EPIC `variable_set` frames.
+   - Uses the same on-change + heartbeat strategy as analog/VSS (fast when changing, slow when stable).
+
+**Rationale:** Treat GPS as another set of analog-like channels with their own smart transmission, while keeping parsing decoupled from CAN logic.
+
 ## Design Patterns
 
 ### State Machine for Protocol Handling

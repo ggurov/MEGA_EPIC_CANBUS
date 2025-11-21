@@ -1,16 +1,20 @@
 # Active Context: MEGA_EPIC_CANBUS
 
 ## Current Status
-**Phase:** Phase 1 Complete - Analog, Digital, VSS I/O Transmission + Smart TX  
+**Phase:** Phase 1 Complete - Analog, Digital, VSS I/O Transmission + Smart TX + GPS  
 **Last Updated:** Current
 
 ## Current Implementation
 Firmware (`mega_epic_canbus.ino`) implements:
-- MCP_CAN library integration at 500 kbps
+- MCP2515 CAN controller integration at 500 kbps (Playing With Fusion `PWFusion_MCP2515` library)
 - CAN transmission capability (variable_set frames)
-- Analog inputs (A0-A15): Periodic sampling, float32 conversion, CAN transmission
-- Digital inputs (D22-D37): 16-bit bitfield packing, inverted logic, CAN transmission
-- VSS inputs (D18-D21): Interrupt-driven edge counting, rate calculation, CAN transmission
+- Analog inputs (A0-A15): Periodic sampling, float32 conversion, CAN transmission with smart TX
+- Digital inputs (D22-D37): 16-bit bitfield packing, inverted logic, CAN transmission with smart TX
+- VSS inputs (D18-D21): Interrupt-driven edge counting, rate calculation, CAN transmission with smart TX
+- GPS over Serial2 (GT‑U7 / NEO‑6M class):
+  - Reads standard NMEA‑0183 (`GPRMC` + `GPGGA`) at a configurable rate (default 115200 baud, 20 Hz for GT‑U7)
+  - Parses time/date, position (lat/lon), speed, course, altitude, fix quality, satellite count
+  - Packs time/date into two `uint32_t` variables and sends all GPS values to ECU via CAN using smart TX
 - Smart transmission layer: per-channel change detection and adaptive TX intervals (fast on-change, slow heartbeat when stable)
 - Big-endian byte conversion utilities
 - Overflow-safe counter and time handling
@@ -69,13 +73,14 @@ Firmware (`mega_epic_canbus.ino`) implements:
 ## Recent Decisions
 - **CAN Speed:** 500 kbps selected (per requirements)
 - **CS Pin:** D9 reserved for MCP_CAN (standard shield configuration)
-- **Serial Debug:** 115200 baud for development/debugging
+- **Serial Debug:** 115200 baud for development/debugging (runtime Serial output currently minimized)
 - **ECU CAN ID:** 1 (configured)
 - **Digital Inputs:** D22-D37 (16 pins, 16-bit bitfield)
 - **VSS Pins:** D18-D21 (INT3, INT2, INT1, INT0) for consistent interrupt behavior
 - **VSS Calculation:** 100ms interval for rate calculation
 - **Smart TX Strategy:** Inputs sampled at 25 ms; changed values transmitted at 25 ms fast interval; stable values transmitted at ~500 ms heartbeat
 - **Pin Planning:** PWM outputs on D2, D3, D5, D6, D7, D8, D11, D12, D44, D45, D46; low-speed outputs on D39, D40, D41, D42, D43, D47, D48, D49; documented in `PINOUT.md`
+- **GPS Defaults:** Serial2 at 115200 baud by default, assuming GT‑U7 (u‑blox7) class module capable of 20 Hz NMEA output; code remains compatible with 9600/1–5 Hz receivers by adjusting constants.
 
 ## Known Issues
 - No EPIC protocol frame parsing (RX only, no handling)

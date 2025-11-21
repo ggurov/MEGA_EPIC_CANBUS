@@ -7,21 +7,34 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 - **PWM outputs** (planned): D2–D8, D10–D13, D44–D46
 - **digital button inputs**: D22–D37
 - **digital low-speed outputs** (planned): D39–D43, D47–D49
-- **CAN 500 kbps** via MCP2515 (`CS=D9`, SPI on D50–D53)
+- **CAN 500 kbps** via MCP2515 (CS on `D9`, SPI via ICSP header or D50–D53)
+- **GPS input over Serial2**: NMEA‑0183 (`GPRMC`/`GPGGA`) parsed and sent to ECU over CAN
 - EPIC protocol operations: variable request/response, variable set, function call
 
 ### Status
-- Current: CAN TX/RX implemented; analog, digital, and VSS inputs sampled and transmitted using a smart on-change + heartbeat strategy
+- Current:
+  - CAN TX/RX implemented
+  - Analog, digital, and VSS inputs sampled and transmitted using a smart on-change + heartbeat strategy
+  - GPS (time, date, position, speed, course, altitude, quality, satellites) read from Serial2, packed, and transmitted to the ECU using the same smart TX pattern
 - Missing: EPIC frame parsing, digital/PWM output modules, error handling
 
 ### Hardware
 - Arduino Mega2560
-- MCP_CAN shield (MCP2515 + transceiver)
-- Wiring:
-  - `CS`: D9 (reserved)
-  - `SPI`: D50 (MISO), D51 (MOSI), D52 (SCK), D53 (SS)
-  - Optional `INT`: D2 for interrupt-driven RX
-  - CAN_H/CAN_L twisted pair with proper 120Ω termination
+- MCP2515‑based CAN shield (e.g. generic MCP_CAN shield)
+- Default GPS module: GT‑U7 (u‑blox 7) style module  
+  (e.g. [GT‑U7 (u‑blox7) module](https://www.amazon.com/dp/B08MZ2CBP7?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_13))
+
+#### Wiring Notes (Important)
+- **SPI / MCP2515:**
+  - Use the **6‑pin ICSP header in the center of the Mega2560** for SPI (MISO/MOSI/SCK).  
+    Many MCP2515 shields have a matching 2×3 header that should plug directly into the ICSP header.
+  - `CS` (chip select) for MCP2515 is **D9** (reserved, do not use for other I/O).
+  - The shield’s SPI pins **must** be routed to the ICSP header or to D50 (MISO), D51 (MOSI), D52 (SCK), D53 (SS) exactly as on a proper shield – avoid flying leads if possible.
+- **CAN interrupt (optional but recommended):**
+  - MCP2515 `INT` should be wired to **D2** on the Mega2560.
+  - Firmware is written to support interrupt‑driven RX using D2 when available.
+- **CAN bus:**
+  - CAN_H/CAN_L twisted pair with proper 120Ω termination at both ends of the bus.
 
 ### Pin Map Summary
 - **Analog inputs**: A0–A15
@@ -48,7 +61,7 @@ See `.project/epic_can_bus_spec.txt` for full details.
 ### Getting Started
 1. Install Arduino IDE (1.8.x or 2.x)
 2. Libraries:
-   - `mcp_canbus` (Seeed/Longan variant)
+   - `PWFusion_MCP2515` (Playing With Fusion MCP2515 library)
    - `SPI` (Arduino core)
 3. Open `mega_epic_canbus.ino`
 4. Board: Arduino Mega or Mega 2560 (ATmega2560)
@@ -57,8 +70,11 @@ See `.project/epic_can_bus_spec.txt` for full details.
 
 ### Configuration
 - `ecuCanId` (0–15): per-device address used to derive CAN IDs (e.g., `0x700 + ecuCanId`). Define this in code and in docs. If not chosen, default to `1` in early testing.
-- `CS` pin: D9 (matches shield default)
-- Optional interrupts: attach MCP2515 `INT` to D2 to reduce RX latency
+- `CS` pin: **D9** (matches shield default and reserved in firmware)
+- Optional interrupts: attach MCP2515 `INT` to **D2** to enable interrupt‑driven RX
+- GPS:
+  - Default baud rate: **115200** (tuned for GT‑U7 / u‑blox 7‑class modules that support 115200 and 20 Hz updates).
+  - Default NMEA update rate: **20 Hz** (module must support this; slower 9600/1–5 Hz receivers can be used by lowering `GPS_BAUD_RATE` / `GPS_UPDATE_RATE_HZ` in code).
 
 ### Repository Structure
 - `mega_epic_canbus.ino` — main sketch (setup, basic CAN RX demo)

@@ -21,6 +21,18 @@
 - **INT Pin:** Typically D2 (interrupt capable)
 - **SPI Pins:** D50 (MISO), D51 (MOSI), D52 (SCK), D53 (SS - unused for MCP_CAN)
 
+### GPS Module
+- **Default Module:** GT‑U7 class module based on u‑blox 7 (for example, [GT‑U7 (u‑blox7) module](https://www.amazon.com/dp/B08MZ2CBP7?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_13))
+- **Interface:** UART (Serial2 on Mega2560)
+- **Default Firmware Settings:**
+  - Baud rate: **115200** (selected to match GT‑U7’s 115200 baud capability).
+  - NMEA update rate: **20 Hz** (module must support this; GT‑U7 does).
+  - Sentences consumed: `GPRMC` and `GPGGA` (standard NMEA‑0183).
+- **Coordinate Format:** DDMM.MMMM / DDDMM.MMMM (degrees and decimal minutes); converted in firmware to signed decimal degrees using helper functions:
+  - `parseLatitudeFromNMEA()` – DDMM.MMMM + N/S → decimal degrees latitude.
+  - `parseLongitudeFromNMEA()` – DDDMM.MMMM + E/W → decimal degrees longitude.
+- **Compatibility:** Other modules (e.g. NEO‑6M) that operate at 9600 baud and 1–5 Hz can be supported by lowering `GPS_BAUD_RATE` and `GPS_UPDATE_RATE_HZ` in `mega_epic_canbus.ino`.
+
 ### Pin Allocation
 **Analog Inputs (16 pins):**
 - A0-A15: Analog sensors (0-5V range), sampled and sent over CAN
@@ -175,7 +187,7 @@
 ## Dependencies
 
 ### Required Libraries
-- **mcp_canbus:** Seeed Studio or Longan Labs MCP_CAN library
+- **PWFusion_MCP2515:** Playing With Fusion MCP2515 CAN library
 - **SPI:** Arduino core library (built-in)
 
 ### Installation
