@@ -2,6 +2,11 @@
 
 Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP2515-based shield. Provides 16 analog inputs, 14 PWM outputs, 15 digital inputs, and 15 digital outputs via the EPIC_CAN_BUS protocol at 500 kbps.
 
+
+![Example MCP2515 Hookup](images/conn1.png)
+
+*Example hookup of the MCP2515 CAN shield to the Arduino Mega2560. Ensure your wiring matches this diagram, especially for SPI lines Interrupt (D2) and CS (D9).*
+
 ### Features
 - **16 analog inputs**: A0–A15 (0–5V)
 - **PWM outputs** (planned): D2–D8, D10–D13, D44–D46
