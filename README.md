@@ -118,4 +118,20 @@ Issues and PRs welcome. Keep changes modular and avoid dynamic allocation on AVR
 ### License
 TBD. If you intend to contribute a license, add a `LICENSE` file and update this section.
 
+---
 
+## 🔄 MCP_CAN Library Port Available
+
+A complete port for the **MCP_CAN library** is now available in the `mega_epic_canbus_mcp_can/` directory.
+
+### Use the MCP_CAN version if you have:
+- Seeed Studio CAN-BUS Shield V2.0
+- SparkFun CAN-BUS Shield  
+- Other commercial MCP2515-based shields
+
+### Quick Start (MCP_CAN version):
+1. Install MCP_CAN library via Arduino Library Manager
+2. Use files in `mega_epic_canbus_mcp_can/` folder
+3. See [MCP_CAN README](mega_epic_canbus_mcp_can/README.md) for details
+
+**Both versions have 100% feature parity** - choose based on your hardware.
