@@ -187,7 +187,7 @@
 ## Dependencies
 
 ### Required Libraries
-- **PWFusion_MCP2515:** Playing With Fusion MCP2515 CAN library
+- **arduino-mcp2515:** autowp MCP2515 CAN interface library ([autowp/arduino-mcp2515](https://github.com/autowp/arduino-mcp2515))
 - **SPI:** Arduino core library (built-in)
 
 ### Installation

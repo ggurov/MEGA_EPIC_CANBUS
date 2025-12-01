@@ -6,7 +6,7 @@
 
 ## Current Implementation
 Firmware (`mega_epic_canbus.ino`) implements:
-- MCP2515 CAN controller integration at 500 kbps (Playing With Fusion `PWFusion_MCP2515` library)
+- MCP2515 CAN controller integration at 500 kbps using `arduino-mcp2515` (autowp MCP2515 CAN interface library)
 - CAN transmission capability (variable_set frames)
 - Analog inputs (A0-A15): Periodic sampling, float32 conversion, CAN transmission with smart TX
 - Digital inputs (D22-D37): 16-bit bitfield packing, inverted logic, CAN transmission with smart TX

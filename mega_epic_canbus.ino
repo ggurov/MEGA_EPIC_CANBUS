@@ -8,29 +8,38 @@
   Author: Gennady Gurov
   Made for: epicEFI project
 */
+/*
+enum CAN_CLOCK {
+    MCP_20MHZ,
+    MCP_16MHZ,
+    MCP_8MHZ
+};
+*/
+
+// 16 mhz is for the seeed studio shield.
+
+#define BOARD_CAN_CLOCK MCP_16MHZ
+
+// 8 mhz is for the mcp2515 generic offboard adapter
+
+//#define BOARD_CAN_CLOCK MCP_8MHZ
+
 
 
 #include <SPI.h>
 #include <stdint.h>
 #include <math.h>
-#include <PWFusion_MCP2515.h>
-#include <PWFusion_MCP2515_Registers.h>
+// Using autowp MCP2515 library: https://github.com/autowp/arduino-mcp2515
+#include <mcp2515.h>
 #include <string.h>
 #include "nmea_parser.h"
 
 // Please modify SPI_CS_PIN to adapt to your board (see table below)
 #define SPI_CS_PIN  9 
 
-MCP2515 CAN;
-// MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 
-// MCP2515 interrupt pin (D2, INT4 on Mega2560)
-#define MCP2515_INT_PIN  2
-
-
-
-// Note: CAN interrupt handling is managed by Playing With Fusion library internally
-// No need for manual interrupt flag - library queues messages and CAN.receive() checks the queue
+// MCP2515 instance (CS pin only; clock is passed to setBitrate)
+MCP2515 CAN(SPI_CS_PIN);
 
 // ECU and EPIC CAN configuration
 #define ECU_CAN_ID  1
@@ -216,53 +225,47 @@ static inline float readFloat32BigEndian(const unsigned char* in)
 }
 
 // Static CAN message structure for sending (reused to avoid stack/heap churn)
-static can_message_t txMsg;
+static struct can_frame txMsg;
 
 static inline void sendVariableSetFrame(int32_t varHash, float value)
 {
     // Prepare message structure
-    txMsg.sid = CAN_ID_VARIABLE_SET;
-    txMsg.extended = 0;  // Standard 11-bit ID
-    txMsg.rtr = 0;       // Data frame
-    txMsg.dlc = 8;       // 8 bytes: 4-byte hash + 4-byte float
+    txMsg.can_id  = CAN_ID_VARIABLE_SET;
+    txMsg.can_dlc = 8;       // 8 bytes: 4-byte hash + 4-byte float
     
     // Write hash and value to data array (big-endian)
     writeInt32BigEndian(varHash, &txMsg.data[0]);
     writeFloat32BigEndian(value, &txMsg.data[4]);
     
     // Send message
-    CAN.send(&txMsg);
+    CAN.sendMessage(&txMsg);
 }
 
 static inline void sendVariableSetFrameU32(int32_t varHash, uint32_t value)
 {
     // Prepare message structure
-    txMsg.sid = CAN_ID_VARIABLE_SET;
-    txMsg.extended = 0;  // Standard 11-bit ID
-    txMsg.rtr = 0;       // Data frame
-    txMsg.dlc = 8;       // 8 bytes: 4-byte hash + 4-byte float
+    txMsg.can_id  = CAN_ID_VARIABLE_SET;
+    txMsg.can_dlc = 8;       // 8 bytes: 4-byte hash + 4-byte float
     
     // Write hash and value to data array (big-endian)
     writeInt32BigEndian(varHash, &txMsg.data[0]);
     writeInt32BigEndian(value, &txMsg.data[4]);
     
     // Send message
-    CAN.send(&txMsg);
+    CAN.sendMessage(&txMsg);
 }
 
 static inline void sendVariableRequestFrame(int32_t varHash)
 {
     // Prepare message structure
-    txMsg.sid = CAN_ID_VAR_REQUEST;
-    txMsg.extended = 0;  // Standard 11-bit ID
-    txMsg.rtr = 0;       // Data frame
-    txMsg.dlc = 4;       // 4 bytes: hash only
+    txMsg.can_id = CAN_ID_VAR_REQUEST;
+    txMsg.can_dlc = 4;       // 4 bytes: hash only
     
     // Write hash to data array (big-endian)
     writeInt32BigEndian(varHash, &txMsg.data[0]);
     
     // Send message
-    CAN.send(&txMsg);
+    CAN.sendMessage(&txMsg);
 }
 
 // ---------------- CAN Filter Configuration ----------------
@@ -270,115 +273,18 @@ static inline void sendVariableRequestFrame(int32_t varHash)
 // This reduces CPU overhead by filtering unwanted messages at hardware level
 static void configureCANFilters()
 {
-    // MCP2515 filter configuration requires direct register access
-    // We need to put MCP2515 in configuration mode, set filters, then return to normal mode
-    
-    // Note: This function uses SPI directly to access MCP2515 registers
-    // The library may have its own methods, but direct access ensures it works
-    
-    // MCP2515 register addresses (from PWFusion_MCP2515_Registers.h)
-    // RXF0: 0x00, RXF1: 0x04, RXF2: 0x08, RXF3: 0x10, RXF4: 0x14, RXF5: 0x18
-    // RXM0: 0x20, RXM1: 0x24
-    // CANCTRL: 0x0F (mode control)
-    
-    // Standard 11-bit ID format in MCP2515 registers:
-    // Bits 10-3 in SIDH (high byte), bits 2-0 in SIDL (low byte, upper 3 bits)
-    // For CAN_ID_VAR_RESPONSE (0x721):
-    //   0x721 = 0000 0111 0010 0001
-    //   SIDH = 0x72 (bits 10-3: 0000 0111 0010)
-    //   SIDL = 0x20 (bits 2-0: 000, extended ID bit = 0)
-    
-    uint16_t filterId = CAN_ID_VAR_RESPONSE;
-    uint8_t sidh = (uint8_t)((filterId >> 3) & 0xFF);
-    uint8_t sidl = (uint8_t)((filterId & 0x07) << 5);  // Standard ID, no extended
-    
-    // Mask: 0x7FF (all 11 bits must match)
-    uint8_t maskSidh = 0xFF;
-    uint8_t maskSidl = 0xE0;  // Bits 7-5 = 111 (match all 3 bits)
-    
-    // Start SPI transaction
-    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
-    
-    // Read CANCTRL to get current mode
-    digitalWrite(SPI_CS_PIN, LOW);
-    SPI.transfer(0x03);  // READ instruction
-    SPI.transfer(0x0F);  // CANCTRL register
-    uint8_t canctrl = SPI.transfer(0x00);
-    digitalWrite(SPI_CS_PIN, HIGH);
-    
-    // Put MCP2515 in configuration mode (REQOP = 100)
-    digitalWrite(SPI_CS_PIN, LOW);
-    SPI.transfer(0x02);  // WRITE instruction
-    SPI.transfer(0x0F);  // CANCTRL register
-    SPI.transfer((canctrl & 0x8F) | 0x80);  // Set REQOP bits to 100 (config mode)
-    digitalWrite(SPI_CS_PIN, HIGH);
-    delayMicroseconds(10);  // Wait for mode change
-    
-    // Configure RXB0 mask (RXM0) - match all 11 bits
-    digitalWrite(SPI_CS_PIN, LOW);
-    SPI.transfer(0x02);  // WRITE instruction
-    SPI.transfer(0x20);  // RXM0SIDH
-    SPI.transfer(maskSidh);
-    SPI.transfer(maskSidl);
-    SPI.transfer(0x00);  // EID8
-    SPI.transfer(0x00);  // EID0
-    digitalWrite(SPI_CS_PIN, HIGH);
-    
-    // Configure RXB0 filter 0 (RXF0) - match CAN_ID_VAR_RESPONSE
-    digitalWrite(SPI_CS_PIN, LOW);
-    SPI.transfer(0x02);  // WRITE instruction
-    SPI.transfer(0x00);  // RXF0SIDH
-    SPI.transfer(sidh);
-    SPI.transfer(sidl);
-    SPI.transfer(0x00);  // EID8
-    SPI.transfer(0x00);  // EID0
-    digitalWrite(SPI_CS_PIN, HIGH);
-    
-    // Configure RXB0 filter 1 (RXF1) - match CAN_ID_VAR_RESPONSE
-    digitalWrite(SPI_CS_PIN, LOW);
-    SPI.transfer(0x02);  // WRITE instruction
-    SPI.transfer(0x04);  // RXF1SIDH
-    SPI.transfer(sidh);
-    SPI.transfer(sidl);
-    SPI.transfer(0x00);  // EID8
-    SPI.transfer(0x00);  // EID0
-    digitalWrite(SPI_CS_PIN, HIGH);
-    
-    // Configure RXB1 mask (RXM1) - match all 11 bits
-    digitalWrite(SPI_CS_PIN, LOW);
-    SPI.transfer(0x02);  // WRITE instruction
-    SPI.transfer(0x24);  // RXM1SIDH
-    SPI.transfer(maskSidh);
-    SPI.transfer(maskSidl);
-    SPI.transfer(0x00);  // EID8
-    SPI.transfer(0x00);  // EID0
-    digitalWrite(SPI_CS_PIN, HIGH);
-    
-    // Configure RXB1 filter 2 (RXF2) - match CAN_ID_VAR_RESPONSE
-    digitalWrite(SPI_CS_PIN, LOW);
-    SPI.transfer(0x02);  // WRITE instruction
-    SPI.transfer(0x08);  // RXF2SIDH
-    SPI.transfer(sidh);
-    SPI.transfer(sidl);
-    SPI.transfer(0x00);  // EID8
-    SPI.transfer(0x00);  // EID0
-    digitalWrite(SPI_CS_PIN, HIGH);
-    
-    // Return to normal mode (REQOP = 000)
-    digitalWrite(SPI_CS_PIN, LOW);
-    SPI.transfer(0x02);  // WRITE instruction
-    SPI.transfer(0x0F);  // CANCTRL register
-    SPI.transfer(canctrl & 0x8F);  // Clear REQOP bits (normal mode)
-    digitalWrite(SPI_CS_PIN, HIGH);
-    
-    SPI.endTransaction();
-    delayMicroseconds(10);  // Wait for mode change
-}
+   // Match all 11 bits for standard IDs on both masks
+    CAN.setFilterMask(MCP2515::MASK0, false, 0x7FF);
+    CAN.setFilterMask(MCP2515::MASK1, false, 0x7FF);
 
-// ---------------- CAN Interrupt Service Routine ----------------
-// Note: Playing With Fusion library handles CAN interrupt setup internally via attachInterrupt()
-// We don't define ISR(INT4_vect) here to avoid conflict with the library's interrupt handling.
-// The library's CAN.receive() method will work with its internal interrupt mechanism.
+    // Configure all filters to accept only CAN_ID_VAR_RESPONSE (standard ID)
+    CAN.setFilter(MCP2515::RXF0, false, CAN_ID_VAR_RESPONSE);
+    CAN.setFilter(MCP2515::RXF1, false, CAN_ID_VAR_RESPONSE);
+    CAN.setFilter(MCP2515::RXF2, false, CAN_ID_VAR_RESPONSE);
+    CAN.setFilter(MCP2515::RXF3, false, CAN_ID_VAR_RESPONSE);
+    CAN.setFilter(MCP2515::RXF4, false, CAN_ID_VAR_RESPONSE);
+    CAN.setFilter(MCP2515::RXF5, false, CAN_ID_VAR_RESPONSE); 
+}
 
 // ---------------- VSS Interrupt Service Routines ----------------
 // Use attachInterrupt() instead of direct ISR definitions to avoid conflicts with library
@@ -790,18 +696,28 @@ void calculateVSSRates() {
     }
 }
 
+/*
 
+enum CAN_CLOCK {
+    MCP_20MHZ,
+    MCP_16MHZ,
+    MCP_8MHZ
+};
+*/
 
 void setup()
 {
     Serial.begin(115200);
     while(!Serial);
-    
-    
-    // Initialize CAN bus: CS pin, INT pin, loopback=false, 500kbps
-    // Playing With Fusion library begin() returns true on success
-    CAN.begin(SPI_CS_PIN, MCP2515_INT_PIN, false, 500);
-    delay(10);
+    // Initialize CAN bus (MCP2515 via autowp/arduino-mcp2515)
+    CAN.reset();
+    CAN.setBitrate(CAN_500KBPS, BOARD_CAN_CLOCK);
+
+    // Configure CAN hardware filters (currently no RX filtering applied; see configureCANFilters())
+    configureCANFilters();
+
+    // Enter normal operation mode (TX/RX enabled)
+    CAN.setNormalMode();
 
     // Initialize GPS (optional - will not block if GPS fails)
        GPS_SERIAL.begin(GPS_BAUD_RATE);
@@ -812,13 +728,7 @@ void setup()
     // Initialize NMEA parser
     nmeaParserInit();
         
-    // Configure MCP2515 hardware filters to accept only CAN_ID_VAR_RESPONSE (0x721)
-    // This reduces CPU overhead by filtering unwanted messages at hardware level
-    configureCANFilters();
-    
-    // Note: Playing With Fusion library's begin() method handles CAN interrupt setup
-    // internally via attachInterrupt(). No manual interrupt configuration needed for CAN.
-    
+    // (CAN filters and INT already configured above)
     // Configure analog inputs A0-A15 with internal pullup enabled
     // Note: Pullup will pull floating pins to ~5V (affects ADC readings)
     for (uint8_t i = 0; i < 16; ++i)
@@ -904,57 +814,57 @@ void setup()
 }
 
 
-void loop()
+// Handle a single received CAN frame
+static void handleCanFrame(const struct can_frame& rxMsg)
 {
-    can_message_t rxMsg; // Allocate memory to store received CAN messages
-
-    // Process CAN frames using library's receive method
-    // Playing With Fusion library handles interrupts internally and queues messages
-    // CAN.receive() returns true if a message is available, false when queue is empty
-    uint8_t frameCount = 0;
-    while (CAN.receive(&rxMsg))
+    // Handle variable response frames for slow GPIO and PWM outputs
+    if ((rxMsg.can_id == CAN_ID_VAR_RESPONSE) && (rxMsg.can_dlc == 8))
     {
-        frameCount++;
-
-        // Handle variable response frames for slow GPIO and PWM outputs
-        if (rxMsg.sid == CAN_ID_VAR_RESPONSE && rxMsg.dlc == 8)
+        int32_t hash = readInt32BigEndian(&rxMsg.data[0]);
+        if (hash == VAR_HASH_OUT_SLOW)
         {
-            int32_t hash = readInt32BigEndian(&rxMsg.data[0]);
-            if (hash == VAR_HASH_OUT_SLOW)
-            {
-                float value = readFloat32BigEndian(&rxMsg.data[4]);
+            float value = readFloat32BigEndian(&rxMsg.data[4]);
 
-                // Treat value as uint32_t bitfield (18 bits: 0-7 slow GPIO, 8-17 PWM)
-                // ECU packs: bits 0-7 = slow GPIO, bits 8-17 = PWM outputs
-                uint32_t rawBits = (value >= 0.0f) ? (uint32_t)(value + 0.5f) : 0u;
-                
-                // Extract slow GPIO bits (0-7) and set digital outputs
-                uint8_t slowBits = (uint8_t)(rawBits & 0xFFu);
-                for (uint8_t i = 0; i < 8; ++i)
-                {
-                    uint8_t pin = SLOW_GPIO_PINS[i];
-                    if (slowBits & (1u << i)) {
-                        digitalWrite(pin, HIGH);
-                    } else {
-                        digitalWrite(pin, LOW);
-                    }
+            // Treat value as uint32_t bitfield (18 bits: 0-7 slow GPIO, 8-17 PWM)
+            // ECU packs: bits 0-7 = slow GPIO, bits 8-17 = PWM outputs
+            uint32_t rawBits = (value >= 0.0f) ? (uint32_t)(value + 0.5f) : 0u;
+            
+            // Extract slow GPIO bits (0-7) and set digital outputs
+            uint8_t slowBits = (uint8_t)(rawBits & 0xFFu);
+            for (uint8_t i = 0; i < 8; ++i)
+            {
+                uint8_t pin = SLOW_GPIO_PINS[i];
+                if (slowBits & (1u << i)) {
+                    digitalWrite(pin, HIGH);
+                } else {
+                    digitalWrite(pin, LOW);
                 }
-                
-                // Extract PWM bits (8-17) and set PWM duty cycles
-                // Each PWM bit represents on/off state (0 = 0%, 1 = 100% duty cycle)
-                // Note: Future enhancement could use full 8-bit PWM values if ECU provides them
-                for (uint8_t i = 0; i < 10; ++i)
-                {
-                    uint8_t pin = PWM_OUTPUT_PINS[i];
-                    uint8_t bitIndex = i + 8;  // Bits 8-17
-                    if (rawBits & (1u << bitIndex)) {
-                        analogWrite(pin, 255);  // 100% duty cycle (ON)
-                    } else {
-                        analogWrite(pin, 0);    // 0% duty cycle (OFF)
-                    }
+            }
+            
+            // Extract PWM bits (8-17) and set PWM duty cycles
+            // Each PWM bit represents on/off state (0 = 0%, 1 = 100% duty cycle)
+            // Note: Future enhancement could use full 8-bit PWM values if ECU provides them
+            for (uint8_t i = 0; i < 10; ++i)
+            {
+                uint8_t pin = PWM_OUTPUT_PINS[i];
+                uint8_t bitIndex = i + 8;  // Bits 8-17
+                if (rawBits & (1u << bitIndex)) {
+                    analogWrite(pin, 255);  // 100% duty cycle (ON)
+                } else {
+                    analogWrite(pin, 0);    // 0% duty cycle (OFF)
                 }
             }
         }
+    }
+}
+
+void loop()
+{
+    struct can_frame rxMsg; // Allocate memory to store received CAN messages
+
+    // Poll for any pending CAN frames and process them
+    while (CAN.readMessage(&rxMsg) == MCP2515::ERROR_OK) {
+        handleCanFrame(rxMsg);
     }
     
 
