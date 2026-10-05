@@ -17,10 +17,11 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
 
 ### Status
 - Current:
-  - CAN TX/RX implemented
-  - Analog, digital, and VSS inputs sampled and transmitted using a smart on-change + heartbeat strategy
+  - CAN TX/RX implemented; the MCP2515 filters accept only the ECU's variable-response ID
+  - Analog (A0–A15), digital (D22–D37) and VSS inputs sampled and transmitted using a smart on-change (25 ms) + heartbeat (500 ms) strategy
   - GPS (time, date, position, speed, course, altitude, quality, satellites) read from Serial2, packed, and transmitted to the ECU using the same smart TX pattern
-- Missing: EPIC frame parsing, digital/PWM output modules, error handling
+  - **Slow outputs applied**: the ECU's unsolicited `MEGA_EPIC_1_OUT_SLOW` variable-response drives the 8 slow GPIO pins and the 10 PWM pins (on/off in v1); the sketch also polls that value every 25 ms as a backstop
+- Missing: ECU-side function-call protocol (the ECU registry is not implemented), PWM duty granularity (bits are on/off only), watchdog and bus-error handling
 
 ### Hardware
 - Arduino Mega2560
@@ -49,15 +50,36 @@ Arduino Mega2560 firmware that expands epicEFI ECU I/O over CAN bus using an MCP
   - D21: Rear Right (INT0, I2C SCL disabled)
 
 ### Protocol (EPIC_CAN_BUS)
-- Base IDs (11-bit standard):
-  - `0x700 + ecuCanId`: Variable request (DLC=4, int32 hash)
-  - `0x720 + ecuCanId`: Variable response (hash + float32 value)
-  - `0x740 + ecuCanId`: Function request (uint16 id, float32 arg1, optional int16 arg2)
-  - `0x760 + ecuCanId`: Function response (uint16 id, return float32)
-  - `0x780 + ecuCanId`: Variable set (hash + float32 value)
+- Base IDs (11-bit standard), per-ECU address `ecuCanId` (this sketch: `ECU_CAN_ID 1`, must match the ECU's `ecuCanId`):
+  - `0x700 + id`: Variable request (DLC=4, int32 hash) — this sketch polls `MEGA_EPIC_1_OUT_SLOW` here every 25 ms
+  - `0x720 + id`: Variable response (hash + float32 value) — the ECU answers polls here **and** broadcasts `MEGA_EPIC_1_OUT_SLOW` unsolicited on change
+  - `0x740`/`0x760 + id`: Function request/response — documented, but **not implemented in the current epicEFI firmware** (the registry is commented out)
+  - `0x780 + id`: Variable set — this sketch pushes every input here (hash + float32 value)
 - Byte order: big-endian for all multi-byte fields
 
-See `.project/epic_can_bus_spec.txt` for full details.
+### Interaction with the epicEFI firmware
+
+Full ECU-side contract (including gating and gotchas): `CLAUDE/mega_epic_canbus.md`
+in the epicEFI firmware repo. Summary:
+
+| Direction | ID | Hash / value | ECU side |
+|---|---|---|---|
+| Mega → ECU | `0x780+id` | `MEGA_EPIC_1_A0..A15` (raw 10-bit ADC counts 0–1023) | `MEGA_EPIC_1_A0..A15` OUTPC, selectable as `MEGA_EPIC_CANBUS_ADC_0..15` analog channels |
+| Mega → ECU | `0x780+id` | `MEGA_EPIC_1_D22_D37` (bit0=D22…bit15=D37, grounded=1) | packed word + per-bit indicators; readable as `MEGA_EPIC_D22..D37` switch inputs |
+| Mega → ECU | `0x780+id` | `canVSSFrontLeft/FrontRight/RearLeft/RearRight` (pulses/sec) | the four `canVSS*` output channels |
+| Mega → ECU | `0x780+id` | packed GPS hashes `703958849` / `-1519914092` and the individual GPS floats | `gps_hours/minutes/seconds/days`, `gps_months/years/quality/satellites`, `gps_latitude` etc. |
+| ECU → Mega | `0x720+id` | `MEGA_EPIC_1_OUT_SLOW` (1430780106), 18-bit packed | bits 0–7 slow GPIO D39–D43/D47–D49, bits 8–17 PWM D3/D5/D6/D7/D8/D11/D12/D44/D45/D46 |
+
+ECU gates: `epicCanAllowSetVar` (external writes, **off by default**) and
+`epicCanEcuReadONLYONWrite` (first accepted write sets the ECU read-only so the
+change is not persisted). The ECU answers an unknown hash with **silence**, not
+a zero — a zero-as-error frame would be indistinguishable from a genuine
+`OUT_SLOW = 0` update on the same ID. The unsolicited `OUT_SLOW` broadcast is
+throttled to the ECU's 20 ms CAN TX interval and can be disabled with
+`disable_mega_epic_slow_out`.
+
+See `.project/epic_can_bus_spec.txt` for the wire format and the historical
+protocol notes.
 
 ### Getting Started
 1. Install Arduino IDE (1.8.x or 2.x)
@@ -90,19 +112,14 @@ See `.project/epic_can_bus_spec.txt` for full details.
   - `epic_can_bus_spec.txt` — protocol summary
 
 ### Roadmap
-- Define and store `ecuCanId`
-- Implement EPIC frame parsing and TX helpers
-- Map variables from `variables.json` to pins (analogs, digital inputs)
-- Implement analog input sampling and variable_set TX with throttling
-- Implement digital input bitfield TX and output application
-- Add PWM output control
-- Enable interrupt-driven CAN RX
-- Add watchdog and error handling
+- Done: `ecuCanId` addressing, TX helpers, variable mapping (`variables.json`), smart TX, digital bitfield, slow/PWM output application, GPS and VSS inputs
+- Open: ECU-side function-call protocol (blocked on the firmware registry), PWM duty values (v1 is on/off), interrupt-driven CAN RX, watchdog and bus-error handling
 
-### Usage (planned behavior)
-- Mega periodically samples A0–A15 and sends values as `variable_set` frames
-- Digital inputs (D20–D34) packed into a bitfield and sent on change/interval
-- ECU responses drive digital outputs (D35–D49) and PWM pins
+### Usage (actual behavior)
+- A0–A15 sampled every 10 ms; `variable_set` on change (25 ms floor) and a 500 ms heartbeat
+- D22–D37 packed (grounded = 1) and sent on change/heartbeat
+- VSS D18–D21 counted by interrupt, pulses/sec sent on change/heartbeat
+- The ECU's `MEGA_EPIC_1_OUT_SLOW` variable-response drives D39–D43/D47–D49 (digital) and D3/D5/D6/D7/D8/D11/D12/D44/D45/D46 (on/off)
 
 ### Performance Targets
 - 500 kbps CAN

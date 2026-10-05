@@ -7,6 +7,13 @@ EPIC (Engine Parameter Interface over CAN) is a protocol for remote variable acc
 2. **Variable Set** - Write configuration values (fire-and-forget)
 3. **Function Call** - Execute registered functions with arguments and return values
 
+> **Implementation status (2026-10):** operations 1 and 2 are live on the ECU;
+> operation 3 is **not implemented** — the ECU function registry is commented
+> out (`firmware/controllers/can/epic_can.cpp`). Sections below describing
+> function calls are the historical design, not current behavior. The ECU-side
+> contract as shipped is summarized in `README.md` ("Interaction with the
+> epicEFI firmware") and in the firmware's `CLAUDE/mega_epic_canbus.md`.
+
 ## CAN ID Base Offsets
 
 All CAN IDs use **11-bit standard IDs** with per-ECU addressing: `BASE + ecuCanId` (where `ecuCanId` = 0-15)
@@ -66,13 +73,19 @@ Data: [F2 42 A4 DC] [42 F6 E6 66]
   1. Runtime values via `getOutputValueByHash()` (from `engine->outputChannels`)
   2. Configuration values via `getConfigValueByHash()` (from `engine->config`)
   
-- **Error Handling**: Returns `0.0` (zero-as-error) if variable not found
+- **Error Handling**: an unknown or policy-excluded hash gets **no response at
+  all** (silent miss), never a zero-as-error frame. The response ID also carries
+  the unsolicited `MEGA_EPIC_1_OUT_SLOW` broadcast, so a synthesized zero would
+  be indistinguishable from a genuine `OUT_SLOW = 0` update and would clobber
+  the remote's state. Pinned by `EpicCanVar.MissingHashIsSilent`.
 
 - **Variable Hash Generation**: 
-  - Hashes are signed 32-bit integers (CRC32-based)
-  - Generated from variable names during firmware build
+  - Hashes are signed 32-bit integers from **`djb2lowerCase`** over the variable
+    name (NOT CRC32), generated during the firmware build
   - Negative hashes are valid (two's complement representation)
-  - Use `gen_variables.py` to generate hash documentation
+  - `variables.json` in this repo is the device-side copy of the generated list;
+    the ECU source of truth is the generated hash lookups filtered by
+    `lua_hash_policy.tsv` (R/W flags)
 
 ---
 
@@ -109,7 +122,22 @@ Data: [07 5B CD 15] [42 48 00 00]
 
 ---
 
-## 3. Function Call Pattern (Request/Response)
+### This device (MEGA_EPIC_CANBUS) — actual traffic
+
+| Direction | ID | Payload | Notes |
+|---|---|---|---|
+| Mega → ECU | `0x780+id` | `variable_set` for A0–A15 (raw 10-bit counts), `MEGA_EPIC_1_D22_D37` (packed, grounded=1), `canVSS*` (pulses/sec), GPS packed and individual hashes | smart TX: change ≥25 ms, heartbeat 500 ms; inputs sampled every 10 ms |
+| Mega → ECU | `0x700+id` | `variable_request` for `MEGA_EPIC_1_OUT_SLOW` (1430780106) every 25 ms | backstop poll; the ECU answers resolvable hashes |
+| ECU → Mega | `0x720+id` | `MEGA_EPIC_1_OUT_SLOW` unsolicited on change (ECU 20 ms CAN TX interval) | 18-bit packed: bits 0–7 slow GPIO D39–D43/D47–D49, bits 8–17 PWM D3/D5/D6/D7/D8/D11/D12/D44/D45/D46 (on/off) |
+
+ECU gates: `epicCanAllowSetVar` (external writes, off by default) and
+`epicCanEcuReadONLYONWrite` (first accepted write sets the ECU read-only). The
+sketch's `ECU_CAN_ID` must equal the ECU's `ecuCanId` (both default to 1).
+
+## 3. Function Call Pattern (Request/Response) — NOT IMPLEMENTED
+
+> Historical design only: the ECU function registry and listener are commented
+> out. Nothing below is live; do not build clients against it.
 
 Execute registered functions with up to 2 arguments and receive return values.
 
@@ -215,13 +243,14 @@ All multi-byte fields use **big-endian** byte order on the wire.
 - **Function Arguments**: float32 (Arg1) and int16 (Arg2)
 - **Return Values**: float32
 
-### Error Handling Philosophy
-EPIC uses a **zero-as-error** pattern:
-- Variable not found → returns `0.0`
-- Function not found → returns `0.0`
-- Invalid operation → returns `0.0`
+### Error Handling Philosophy (as shipped)
+- Variable not found / policy-excluded → **no response** (silent miss; see the
+  Variable Request section — zero-as-error would clobber the slow-state
+  broadcast on the same ID)
+- Variable set → no ACK in v1
+- Function calls → not implemented
 
-Clients must handle defensive checking and distinguish between legitimate zero values and errors.
+Clients must tolerate a request timing out and keep the last broadcast-fed state.
 
 ### Bus Routing
 - Responses always sent on the **same CAN bus** as the request
